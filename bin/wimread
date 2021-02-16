@@ -1,0 +1,11 @@
+#!/usr/bin/env/python
+
+from tllab_common.wimread import imread
+
+if __name__ == '__main__':
+    fname = sys.argv[1]
+    if os.path.exists(fname):
+        with imread(fname) as im:
+            print(im.summary)
+    else:
+        print('File does not exist.')
