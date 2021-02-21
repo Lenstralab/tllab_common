@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="tllab_common",
-    version="2021.2.0",
+    version="2021.2.1",
     author="Wim Pomp @ Lenstra lab NKI",
     author_email="w.pomp@nki.nl",
     description="Common code for the Lenstra lab.",
@@ -21,6 +21,6 @@ setuptools.setup(
     ],
     python_requires='>=2.7',
     install_requires=['untangle', 'javabridge', 'python-bioformats', 'pandas', 'psutil', 'numpy', 'tqdm', 'tifffile',
-                      'czifile', 'pyyaml'],
+                      'czifile', 'pyyaml', 'dill'],
     scripts=['bin/wimread'],
 )
