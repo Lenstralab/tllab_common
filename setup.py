@@ -1,11 +1,12 @@
 import setuptools
+import git
 
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setuptools.setup(
     name="tllab_common",
-    version="2021.2.1",
+    version=[i for i in git.Git('.').log('-1', '--date=format:%Y%m%d%H%M').splitlines() if i.startswith('Date:')][0][-12:],
     author="Wim Pomp @ Lenstra lab NKI",
     author_email="w.pomp@nki.nl",
     description="Common code for the Lenstra lab.",

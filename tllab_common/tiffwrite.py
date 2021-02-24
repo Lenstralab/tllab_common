@@ -7,7 +7,7 @@ from multiprocessing import Pool, Process, Queue, Event, cpu_count, Value, util,
 from time import sleep
 from tqdm.auto import tqdm
 
-def tiffwrite(file, data, axes='TZCXY'):
+def tiffwrite(file, data, axes='TZCXY', bar=False):
     """ Saves an image using the bigtiff format, openable in ImageJ as hyperstack
         Uses multiple processes to quickly compress as good as possible
         file: filename of the new tiff file
@@ -27,7 +27,7 @@ def tiffwrite(file, data, axes='TZCXY'):
 
     shape = data.shape[:3]
     with IJTiffWriter(file, shape[::-1]) as f:
-        with tqdm(total=np.prod(shape), desc='Saving tiff') as bar:
+        with tqdm(total=np.prod(shape), desc='Saving tiff', disable=not bar) as bar:
             for t in range(shape[0]):
                 for z in range(shape[1]):
                     for c in range(shape[2]):
@@ -333,6 +333,7 @@ class IJTiffWriter():
             framenr = [framenr]
         
         self.frames.extend(framenr)
+        print('putting frame {}'.format(framenr))
         self.Qi.put((frame, framenr))
 
     def close(self):

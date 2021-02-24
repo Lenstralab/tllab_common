@@ -195,7 +195,7 @@ def transform(im, T, inverse=False):
     return tfilter_transform(im, tfilter)
 
 def get_bead_files(im):
-    from tllab_common.wimread import imread
+    from tllab_common_wp.wimread import imread
     if im.path.endswith('Pos0'):
         path = os.path.dirname(os.path.dirname(im.path))
     else:
@@ -218,7 +218,7 @@ def get_bead_files(im):
     return Files
 
 def get_transform(im):
-    from tllab_common.tiffwrite import IJTiffWriter
+    from tllab_common_wp.tiffwrite import IJTiffWriter
     if im.path.endswith('Pos0'):
         path = os.path.dirname(os.path.dirname(im.path))
     else:
@@ -260,7 +260,7 @@ def get_transform(im):
         return T
 
 def transform_from_beads(file):
-    from tllab_common.wimread import imread
+    from tllab_common_wp.wimread import imread
 
     with imread(file) as jm:
         jmr = jm.maxz(jm.detector.index(jm.slavech))
