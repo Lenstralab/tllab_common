@@ -360,7 +360,7 @@ class imread:
 
         # handle transforms
         if not transform is False:
-            from tllab_common_wp.transforms import frame_transform, init_transform
+            from tllab_common.transforms import frame_transform, init_transform
             self.dotransform = True
             self.__framet__ = lambda c, z, t: frame_transform(self, c, z, t)
             init_transform(self, transform)
@@ -853,7 +853,7 @@ class imread:
         return c + z * self.shape[2] + t * self.shape[2] * self.shape[3]
 
     def transform_frame(self, frame, c, *args):
-        from tllab_common_wp.transforms import tfilter_transform
+        from tllab_common.transforms import tfilter_transform
         if self.dotransform and self.detector[c] == self.masterch:
             return tfilter_transform(frame, self.tfilter)
         else:
@@ -1108,7 +1108,7 @@ class imread:
         """ saves the image as a tiff-file
             split: split channels into different files
         """
-        from tllab_common_wp.tiffwrite import IJTiffWriter
+        from tllab_common.tiffwrite import IJTiffWriter
         if fname is None:
             fname = self.path[:-3] + 'tif'
         elif not fname[-3:] == 'tif':

@@ -12,7 +12,7 @@ def tiffwrite(file, data, axes='TZCXY', bar=False):
         Uses multiple processes to quickly compress as good as possible
         file: filename of the new tiff file
         data: 2 to 5D array
-        axes: order of dimensions in data, default: TCZXY for 5D, CZXY for 4D, ZXY for 3D, XY for 2D
+        axes: order of dimensions in data, default: TZCXY for 5D, ZCXY for 4D, CXY for 3D, XY for 2D
         wp@tl20200214
     """
     
@@ -267,7 +267,7 @@ class IJTiffWriter():
         c, z, t: color, z, time coordinates of the frame
         
     """
-    def __init__(self, file, shape, nP=None):
+    def __init__(self, file, shape, nP=None, dtype=None):
         self.file = file
         self.shape = shape #CZT
         self.bigtiff = True #normal tiff also possible, but should be opened by bioformats in ImageJ
@@ -275,8 +275,7 @@ class IJTiffWriter():
         self.frames = []
         self.nP = nP or min(int(cpu_count()/6), np.prod(shape))
         self.dshape = (256, 256)
-        self.dtype = 'uint16'
-        
+        self.dtype = None if dtype is None else np.dtype(dtype)
         self.Qi = Queue(10*self.nP)
         self.Qo = Queue(10*self.nP)
         self.E  = Queue()
@@ -306,8 +305,7 @@ class IJTiffWriter():
             ndim = len(self.dshape)
         else:
             self.dshape = frame.shape
-            self.dtype = frame.dtype
-            assert self.dtype.char in 'BHhf', 'datatype not supported'
+            assert self.dtype is None and frame.dtype.char in 'BHhf' or self.dtype.char in 'BHhf', 'datatype not supported'
             #RGB maybe?
             if frame.ndim==3:
                 assert frame.shape[2] in (1,2,3,4), 'RGB frame must have color as 3rd dimension'
@@ -316,10 +314,12 @@ class IJTiffWriter():
                 if frame.shape[2]==2:
                     frame = np.dstack((frame, np.zeros(frame.shape[:2], frame.dtype)))
                 if frame.ndim==3:
-                    assert frame.dtype=='B', 'RGB frame can only be uint8'
+                    assert self.dtype is None and frame.dtype=='B' or self.dtype=='B', 'RGB frame can only be uint8'
             else:
                 assert frame.ndim==2, 'Frame must either have 2 or 3 dimensions'
             ndim = frame.ndim
+            if not self.dtype is None:
+                frame = frame.astype(self.dtype)
         
         if len(n)==1:
             framenr = n[0]
@@ -333,7 +333,6 @@ class IJTiffWriter():
             framenr = [framenr]
         
         self.frames.extend(framenr)
-        print('putting frame {}'.format(framenr))
         self.Qi.put((frame, framenr))
 
     def close(self):

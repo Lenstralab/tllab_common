@@ -195,7 +195,7 @@ def transform(im, T, inverse=False):
     return tfilter_transform(im, tfilter)
 
 def get_bead_files(im):
-    from tllab_common_wp.wimread import imread
+    from tllab_common.wimread import imread
     if im.path.endswith('Pos0'):
         path = os.path.dirname(os.path.dirname(im.path))
     else:
@@ -218,7 +218,7 @@ def get_bead_files(im):
     return Files
 
 def get_transform(im):
-    from tllab_common_wp.tiffwrite import IJTiffWriter
+    from tllab_common.tiffwrite import IJTiffWriter
     if im.path.endswith('Pos0'):
         path = os.path.dirname(os.path.dirname(im.path))
     else:
@@ -260,7 +260,7 @@ def get_transform(im):
         return T
 
 def transform_from_beads(file):
-    from tllab_common_wp.wimread import imread
+    from tllab_common.wimread import imread
 
     with imread(file) as jm:
         jmr = jm.maxz(jm.detector.index(jm.slavech))
@@ -340,3 +340,36 @@ def init_transform(im, T=None):
     im.tfilter = sitk.TransformixImageFilter()
     im.tfilter.LogToConsoleOff()
     im.tfilter.SetTransformParameterMap(im.transform)
+
+def new_transform(**kwargs):
+    """ get a new transform object for affine transformations
+    """
+    p = {'CenterOfRotationPoint': ('0', '0'),
+     'CompressResultImage': ('false',),
+     'DefaultPixelValue': ('0.0',),
+     'Direction': ('1', '0', '0', '1'),
+     'FinalBSplineInterpolationOrder': ('3',),
+     'FixedImageDimension': ('2',),
+     'FixedInternalImagePixelType': ('float',),
+     'HowToCombineTransforms': ('Compose',),
+     'Index': ('0', '0'),
+     'InitialTransformParametersFileName': ('NoInitialTransform',),
+     'MovingImageDimension': ('2',),
+     'MovingInternalImagePixelType': ('float',),
+     'NumberOfParameters': ('6',),
+     'Origin': ('0', '0'),
+     'ResampleInterpolator': ('FinalBSplineInterpolator',),
+     'Resampler': ('DefaultResampler',),
+     'ResultImageFormat': ('nii',),
+     'ResultImagePixelType': ('float',),
+     'Size': ('0', '0'),
+     'Spacing': ('1', '1'),
+     'Transform': ('AffineTransform',),
+     'TransformParameters': ('1', '0', '0', '1', '0', '0'),
+     'UseDirectionCosines': ('true',)}
+    T = sitk.ParameterMap()
+    for k, v in p.items():
+        T[k] = v
+    for k, v in kwargs.items():
+        T[k] = tuple([str(i) for i in v])
+    return T
