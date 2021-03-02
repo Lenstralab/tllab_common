@@ -22,6 +22,6 @@ setuptools.setup(
     ],
     python_requires='>=2.7',
     install_requires=['untangle', 'javabridge', 'python-bioformats', 'pandas', 'psutil', 'numpy', 'tqdm', 'tifffile',
-                      'czifile', 'pyyaml', 'dill'],
+                      'czifile', 'pyyaml', 'dill', 'colorcet'],
     scripts=['bin/wimread'],
 )

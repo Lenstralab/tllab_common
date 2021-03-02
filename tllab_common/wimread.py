@@ -7,6 +7,7 @@ from tifffile import imread as tiffread
 from datetime import datetime
 import czifile
 import yaml
+from itertools import product
 
 py2 = sys.version_info[0] == 2
 
@@ -565,7 +566,16 @@ class imread:
             print('Series {} does not exist.'.format(self.series))
         self.reader.rdr.setSeries(self.series)
 
-        self.__frame__ = lambda *args: self.reader.read(*args, rescale=False).astype('float')
+        def reader(*args):
+            frame = self.reader.read(*args, rescale=False).astype('float')
+            if frame.ndim == 3:
+                return frame[..., args[0]]
+            else:
+                return frame
+
+        self.__frame__ = reader
+
+        # self.__frame__ = lambda *args: self.reader.read(*args, rescale=False).astype('float')
 
         X = self.reader.rdr.getSizeX()
         Y = self.reader.rdr.getSizeY()
@@ -702,7 +712,7 @@ class imread:
         s += 'Exposuretime:  ' + ('{:.2f} ' * len(self.exposuretime)).format(
             *(np.array(self.exposuretime) * 1000)) + 'ms\n'
         if self.timeseries:
-            if np.diff(self.timeval).shape[0]:
+            if self.timeval and np.diff(self.timeval).shape[0]:
                 s += 't-interval:    {:.3f} ± {:.3f} s\n'.format(
                     np.diff(self.timeval).mean(),
                     np.diff(self.timeval).std())
@@ -1104,11 +1114,11 @@ class imread:
                 return
         return
 
-    def save_as_tiff(self, fname=None, c=None, z=None, t=None, split=False, bar=True, pixel_type='uint16', rgb=False):
+    def save_as_tiff(self, fname=None, c=None, z=None, t=None, split=False, bar=True, pixel_type='uint16'):
         """ saves the image as a tiff-file
             split: split channels into different files
         """
-        from tllab_common.tiffwrite import IJTiffWriter
+        from tllab_common.tiffwrite2 import IJTiffWriter
         if fname is None:
             fname = self.path[:-3] + 'tif'
         elif not fname[-3:] == 'tif':
@@ -1121,41 +1131,20 @@ class imread:
                     self.save_as_tiff(fname[:-3] + 'C[i]{:01d}.tif'.format(i), i, None, 0, False, bar, pixel_type)
         else:
             n = [c, z, t]
-            s = ('C', 'Z', 'T')
             for i in range(len(n)):
                 if n[i] is None:
                     n[i] = range(self.shape[i + 2])
                 elif not isinstance(n[i], (tuple, list)):
                     n[i] = (n[i],)
 
-            if rgb:
-                mx = [self.max(c) for c in n[0]]
-                mn = [self.min(c) for c in n[0]]
-
-                with IJTiffWriter(fname, (len(n[0]), len(n[1]), len(n[2]))) as f:
-                    with tqdm(total=np.prod((len(n[1]), len(n[2]))),
-                              desc='Saving frames', leave=False, disable=not bar) as bar:
-                        for j, z in enumerate(n[1]):
-                            for k, t in enumerate(n[2]):
-                                frame = []
-                                for i, c in enumerate(n[0]):
-                                    cframe = self(c, z, t)
-                                    cframe -= mn[i]
-                                    cframe /= (mx[i] - mn[i])
-                                    cframe *= 255
-                                    frame.append(cframe)
-                                frame = np.dstack(frame).astype('uint8')
-                                f.save(frame, j, k)
-                                bar.update()
-            else:
-                with IJTiffWriter(fname, (len(n[0]), len(n[1]), len(n[2]))) as f:
-                    with tqdm(total=np.prod((len(n[0]), len(n[1]), len(n[2]))),
-                              desc='Saving frames', leave=False, disable=not bar) as bar:
-                        for i, c in enumerate(n[0]):
-                            for j, z in enumerate(n[1]):
-                                for k, t in enumerate(n[2]):
-                                    f.save(self(c, z, t).astype(pixel_type), i, j, k)
-                                    bar.update()
+            shape = [len(i) for i in n]
+            at_least_one = False
+            with IJTiffWriter(fname, shape, pixel_type) as tif:
+                for i, m in tqdm(zip(product(*[range(s) for s in shape]), product(*n)),
+                                 total=np.prod(shape), desc='Saving tiff', disable=not bar):
+                    if np.any(self(*m)) or not at_least_one:
+                        tif.save(self(*m), *i)
+                        at_least_one = True
 
     @property
     def summary(self):

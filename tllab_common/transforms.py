@@ -218,7 +218,7 @@ def get_bead_files(im):
     return Files
 
 def get_transform(im):
-    from tllab_common.tiffwrite import IJTiffWriter
+    from tllab_common.tiffwrite2 import IJTiffWriter
     if im.path.endswith('Pos0'):
         path = os.path.dirname(os.path.dirname(im.path))
     else:
@@ -234,20 +234,18 @@ def get_transform(im):
     else:
         Files = [im.beadfile]
     T = []
-    Km = []
-    for file in Files:
-        try:
-            print('Using {} to calculate a transform.'.format(file))
-            t, km = transform_from_beads(file)
-            T.append(t)
-            Km.append(km)
-        except:
-            continue
-
     tifpath = tpath[:-3] + 'tif'
-    with IJTiffWriter(tifpath, (3, 1, len(Km))) as f:
-        for i, km in enumerate(Km):
-            f.save(km, 3*i)
+    with IJTiffWriter(tifpath, (2, 1, len(Files))) as tif:
+        for s, file in enumerate(Files):
+            try:
+                print('Using {} to calculate a transform.'.format(file))
+                t, jmr, jmg = transform_from_beads(file)
+                T.append(t)
+                tif.save(jmr, 0, 0, s)
+                tif.save(jmg, 1, 0, s)
+            except:
+                print('Error while calculating transform from {}.'.format(file))
+                continue
 
     if not T:
         print('Unable to automatically create a transform.')
@@ -268,20 +266,13 @@ def transform_from_beads(file):
         T = affine_registration(jmr, jmg)
 
         jmr = np.hstack((jmr, jmr))
-        jmr -= np.nanmin(jmr)
-        jmr *= 255 / np.nanmax(jmr)
-
         jmg = np.hstack((jmg, transform(jmg, T)))
-        jmg -= np.nanmin(jmg)
-        jmg *= 255 / np.nanmax(jmg)
-
-        km = np.dstack((jmr, jmg, np.zeros(np.shape(jmr)))).astype('uint8')
 
         rotcenter = np.array([float(i) for i in T[0]['CenterOfRotationPoint']])
         rotcenter += jm.frameoffset
         jm.close()
         T[0]['CenterOfRotationPoint'] = ['{:.99f}'.format(i).rstrip('0').rstrip('.') for i in rotcenter]
-    return T, km
+    return T, jmr, jmg
 
 def average_transforms(*Ti):
     N = len(Ti)
