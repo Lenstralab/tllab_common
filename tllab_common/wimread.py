@@ -3,7 +3,7 @@
 import untangle, os, sys, javabridge, bioformats, re, json, pandas, psutil
 import numpy as np
 from tqdm.auto import tqdm
-from tifffile import imread as tiffread
+import tifffile
 from datetime import datetime
 import czifile
 import yaml
@@ -328,8 +328,13 @@ class imread:
             self.ndarray()
         elif self.filetype == '.czi':
             self.cziread()
+        elif self.filetype in ('.tif', '.tiff'):
+            self.tiffread()
         elif self.filetype:
             self.bfread()
+
+        if not hasattr(self, 'cnamelist'):
+            self.cnamelist = 'abcdefghijklmnopqrstuvwxyz'[:self.shape[2]]
 
         if not meta is None:
             for key, item in meta.items():
@@ -369,6 +374,37 @@ class imread:
             self.dotransform = False
 
         # self.xmeta = xmldata(self.omedata)
+
+    def tiffread(self):
+        tif = tifffile.TiffFile(self.path)
+        if not tif.is_imagej:  # panic and use bioformats if file does not have imagej metadata
+            tif.close()
+            self.bfread()
+            return
+        self.close = tif.close
+
+        def reader(c, z, t):
+            if self.pndim == 3:
+                return tif.asarray(z + t * self.shape[3])[c]
+            else:
+                return tif.asarray(c + z * self.shape[2] + t * self.shape[2] * self.shape[3])
+
+        self.__frame__ = reader
+        M = tif.imagej_metadata
+        P = tif.pages[0]
+        self.pndim = P.ndim
+        X = P.imagewidth
+        Y = P.imagelength
+        if self.pndim == 3:
+            C = P.samplesperpixel
+        else:
+            C = M.get('channels', 1)
+        Z = M.get('slices', 1)
+        T = M.get('nframes', 1)
+        self.shape = (X, Y, C, Z, T)
+        self.timeseries = self.shape[4] > 1
+        self.zstack = self.shape[3] > 1
+        # TODO: more metadata
 
     def cziread(self):
         #TODO: make sure frame function still works when a subblock has data from more than one frame
@@ -509,7 +545,7 @@ class imread:
                 maxt = t
         self.filedict = filedict
         self.cnamelist = [str(cname) for cname in cnamelist]
-        self.__frame__ = lambda c=0, z=0, t=0: tiffread(os.path.join(self.path, self.filedict[(c, z, t)]))
+        self.__frame__ = lambda c=0, z=0, t=0: tifffile.imread(os.path.join(self.path, self.filedict[(c, z, t)]))
 
         if (0, 0, 0) in self.filedict:
             path0 = os.path.join(self.path, self.filedict[(0, 0, 0)])
@@ -745,7 +781,7 @@ class imread:
             im(c,z,t): return im(c,z,t)
         """
         if len(n) == 1:
-            n = n[0]
+            n = self.get_channel(n[0])
             c = n % self.shape[2]
             z = (n // self.shape[2]) % self.shape[3]
             t = (n // (self.shape[2] * self.shape[3])) % self.shape[4]
@@ -869,69 +905,60 @@ class imread:
         else:
             return frame
 
-    def max(self, c):
-        T = np.full(self.shape[:2], -np.inf)
-        for z in range(self.shape[3]):
-            for t in range(self.shape[4]):
-                T = np.max(np.dstack((T, self.__frame__(c, z, t))), 2)
-        return self.transform_frame(T, c)
+    def get_czt(self, c, z, t):
+        if c is None:
+            c = range(self.shape[2])
+        if z is None:
+            z = range(self.shape[3])
+        if t is None:
+            t = range(self.shape[4])
+        c = tolist(c)
+        z = tolist(z)
+        t = tolist(t)
+        c = [self.get_channel(ic) for ic in c]
+        return c, z, t
 
-    def min(self, c):
-        T = np.full(self.shape[:2], np.inf)
-        for z in range(self.shape[3]):
-            for t in range(self.shape[4]):
-                T = np.min(np.dstack((T, self.__frame__(c, z, t))), 2)
-        return self.transform_frame(T, c)
+    def min(self, c=None, z=None, t=None):
+        c, z, t = self.get_czt(c, z, t)
+        T = np.full(self.shape[:2], np.inf, self.dtype)
+        for ic in c:
+            m = np.full(self.shape[:2], np.inf, self.dtype)
+            for iz, it in product(z, t):
+                m = np.nanmin((m, self.__frame__(ic, iz, it)), 0)
+            T = np.nanmin((T, self.transform_frame(m, ic)), 0)
+        return T.astype(self.dtype)
 
-    def maxz(self, c=0, t=0):
-        """ returns max-z projection at color c and time t
-        """
-        T = np.full(self.shape[:2], -np.inf)
-        for z in range(self.shape[3]):
-            T = np.max(np.dstack((T, self.__frame__(c, z, t))), 2)
-        return self.transform_frame(T, c)
+    def max(self, c=None, z=None, t=None):
+        c, z, t = self.get_czt(c, z, t)
+        T = np.full(self.shape[:2], -np.inf, self.dtype)
+        for ic in c:
+            m = np.full(self.shape[:2], -np.inf, self.dtype)
+            for iz, it in product(z, t):
+                m = np.nanmax((m, self.__frame__(ic, iz, it)), 0)
+            T = np.nanmax((T, self.transform_frame(m, ic)), 0)
+        return T.astype(self.dtype)
 
-    def meanz(self, c=0, t=0):
-        """ returns mean-z projection at color c and time t
-        """
-        T = np.zeros(self.shape[:2])
-        l = self.shape[3]
-        for z in range(self.shape[3]):
-            T += self.__frame__(c, z, t) / self.shape[3]
-        return self.transform_frame(T, c)
+    def mean(self, c=None, z=None, t=None):
+        # TODO: handle nans correctly
+        c, z, t = self.get_czt(c, z, t)
+        n = len(c) * len(z) * len(t)
+        T = np.zeros(self.shape[:2], float)
+        for ic in c:
+            m = np.zeros(self.shape[:2], float)
+            for iz, it in product(z, t):
+                m += self.__frame__(ic, iz, it).astype(float) / n
+            T += self.transform_frame(m, ic)
+        return T
 
-    def sumz(self, c=0, t=0):
-        """ returns sum-z projection at color c and time t
-        """
-        T = np.zeros(self.shape[:2])
-        for z in range(self.shape[3]):
-            T += self.__frame__(c, z, t)
-        return self.transform_frame(T, c)
-
-    def maxt(self, c=0, z=0):
-        """ returns max-t projection at color c and slice z
-        """
-        T = np.full(self.shape[:2], -np.inf)
-        for t in range(self.shape[4]):
-            T = np.max(np.dstack((T, self.__frame__(c, z, t))), 2)
-        return self.transform_frame(T, c)
-
-    def meant(self, c=0, z=0):
-        """ returns mean-t projection at color c and slice z
-        """
-        T = np.zeros(self.shape[:2])
-        l = self.shape[3]
-        for t in range(self.shape[4]):
-            T += self.__frame__(c, z, t) / self.shape[4]
-        return self.transform_frame(T, c)
-
-    def sumt(self, c=0, z=0):
-        """ returns sum-t projection at color c and slice z
-        """
-        T = np.zeros(self.shape[:2])
-        for t in range(self.shape[4]):
-            T += self.__frame__(c, z, t)
-        return self.transform_frame(T, c)
+    def sum(self, c=None, z=None, t=None):
+        c, z, t = self.get_czt(c, z, t)
+        T = []
+        for ic in c:
+            m = np.zeros(self.shape[:2], self.dtype)
+            for iz, it in product(z, t):
+                m = np.nansum((m, self.__frame__(ic, iz, it)), 0)
+            T.append(self.transform_frame(m, ic))
+        return np.nansum(T, 0)
 
     @property
     def dtype(self):
@@ -941,9 +968,19 @@ class imread:
     def dtype(self, value):
         self._dtype = np.dtype(value)
 
+    def get_channel(self, channel_name):
+        if not isinstance(channel_name, str):
+            return channel_name
+        else:
+            c = [i for i, c in enumerate(self.cnamelist) if c.lower().startswith(channel_name.lower())]
+            assert len(c)>0, 'Channel {} not found in {}'.format(c, self.cnamelist)
+            assert len(c)<2, 'Channel {} not unique in {}'.format(c, self.cnamelist)
+            return c[0]
+
     def frame(self, c=0, z=0, t=0):
         """ returns single 2D frame
         """
+        c = self.get_channel(c)
         c %= self.shape[2]
         z %= self.shape[3]
         t %= self.shape[4]
