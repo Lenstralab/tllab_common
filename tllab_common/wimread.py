@@ -390,7 +390,7 @@ class imread:
                 return tif.asarray(c + z * self.shape[2] + t * self.shape[2] * self.shape[3])
 
         self.__frame__ = reader
-        M = tif.imagej_metadata
+        self.metadata = tif.imagej_metadata
         P = tif.pages[0]
         self.pndim = P.ndim
         X = P.imagewidth
@@ -398,9 +398,9 @@ class imread:
         if self.pndim == 3:
             C = P.samplesperpixel
         else:
-            C = M.get('channels', 1)
-        Z = M.get('slices', 1)
-        T = M.get('nframes', 1)
+            C = self.metadata.get('channels', 1)
+        Z = self.metadata.get('slices', 1)
+        T = self.metadata.get('frames', 1)
         self.shape = (X, Y, C, Z, T)
         self.timeseries = self.shape[4] > 1
         self.zstack = self.shape[3] > 1
@@ -937,6 +937,9 @@ class imread:
                 m = np.nanmax((m, self.__frame__(ic, iz, it)), 0)
             T = np.nanmax((T, self.transform_frame(m, ic)), 0)
         return T.astype(self.dtype)
+
+    def maxz(self, c, t):
+        return self.max(c, None, t)
 
     def mean(self, c=None, z=None, t=None):
         # TODO: handle nans correctly
