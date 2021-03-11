@@ -7,6 +7,8 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="tllab_common",
+    packages=['tllab_common'],
+    package_dir={'tllab_common': os.path.dirname(__file__)},
     version=[i for i in git.Git('.').log('-1', '--date=format:%Y%m%d%H%M').splitlines() if i.startswith('Date:')][0][-12:],
     author="Wim Pomp @ Lenstra lab NKI",
     author_email="w.pomp@nki.nl",
@@ -14,8 +16,6 @@ setuptools.setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://gitlab.rhpc.nki.nl/LenstraLab/tllab_common",
-    packages=['tllab_common'],
-    package_dir={'tllab_common': os.path.dirname(__file__)},
     classifiers=[
         "Programming Language :: Python :: 2.7",
         "Programming Language :: Python :: 3",
