@@ -1,5 +1,12 @@
 # Common Code
-Code that both LiveCellAnalysis and smFISH (or others) use and doesn't get major changes goes here. This should be installed on curie by an administrator for everyone, ie. sudo pip install /path/to/common-code --upgrade.
+Code that both LiveCellAnalysis and smFISH (or others) use and doesn't get major changes goes here. This code should be a submodule in smFISH and LiveCellAnalysis.
+
+This code can be installed as a package:
+
+    sudo pip install /path/to/tllab_common --upgrade.
+or:
+
+    pip install -e /path/to/tllab_common --user
 
 # Command line tools:
 ## wimread
