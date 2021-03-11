@@ -1,3 +1,4 @@
+import os
 import setuptools
 import git
 
@@ -12,8 +13,9 @@ setuptools.setup(
     description="Common code for the Lenstra lab.",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://gitlab.rhpc.nki.nl/LenstraLab/common-code",
-    packages=setuptools.find_packages(),
+    url="https://gitlab.rhpc.nki.nl/LenstraLab/tllab_common",
+    packages=['tllab_common'],
+    package_dir={'tllab_common': os.path.dirname(__file__)},
     classifiers=[
         "Programming Language :: Python :: 2.7",
         "Programming Language :: Python :: 3",
