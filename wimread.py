@@ -695,6 +695,10 @@ class imread:
         global vm_started
         if not vm_started:
             javabridge.start_vm(class_path=bioformats.JARS, run_headless=True)
+            outputstream = javabridge.make_instance('java/io/ByteArrayOutputStream', "()V")
+            printstream = javabridge.make_instance('java/io/PrintStream', "(Ljava/io/OutputStream;)V", outputstream)
+            javabridge.static_call('Ljava/lang/System;', "setOut", "(Ljava/io/PrintStream;)V", printstream)
+            javabridge.static_call('Ljava/lang/System;', "setErr", "(Ljava/io/PrintStream;)V", printstream)
             vm_started = True
             log4j = javabridge.JClassWrapper("loci.common.Log4jTools")
             log4j.enableLogging()

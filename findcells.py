@@ -1,5 +1,7 @@
+import skimage
+import skimage.segmentation
 import skimage.feature
-import scipy, skimage
+import scipy
 import numpy as np
 from tqdm.auto import tqdm
 
