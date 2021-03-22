@@ -942,7 +942,8 @@ class imread:
             T = np.nanmax((T, self.transform_frame(m, ic)), 0)
         return T.astype(self.dtype)
 
-    def maxz(self, c, t):
+    def maxz(self, c=0, t=0):
+        # deprecated, use max() instead
         return self.max(c, None, t)
 
     def mean(self, c=None, z=None, t=None):

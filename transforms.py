@@ -261,8 +261,8 @@ def transform_from_beads(file):
     from tllab_common.wimread import imread
 
     with imread(file) as jm:
-        jmr = jm.maxz(jm.detector.index(jm.slavech))
-        jmg = jm.maxz(jm.detector.index(jm.masterch))
+        jmr = jm.max(jm.detector.index(jm.slavech))
+        jmg = jm.max(jm.detector.index(jm.masterch))
         T = affine_registration(jmr, jmg)
 
         jmr = np.hstack((jmr, jmr))
