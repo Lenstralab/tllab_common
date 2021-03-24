@@ -1171,9 +1171,9 @@ class imread:
         if split:
             for i in range(self.shape[2]):
                 if self.timeseries:
-                    self.save_as_tiff(fname[:-3] + 'C[i]{:01d}.tif'.format(i), i, 0, None, False, bar, pixel_type)
+                    self.save_as_tiff(fname[:-3] + 'C{:01d}.tif'.format(i), i, 0, None, False, bar, pixel_type)
                 else:
-                    self.save_as_tiff(fname[:-3] + 'C[i]{:01d}.tif'.format(i), i, None, 0, False, bar, pixel_type)
+                    self.save_as_tiff(fname[:-3] + 'C{:01d}.tif'.format(i), i, None, 0, False, bar, pixel_type)
         else:
             n = [c, z, t]
             for i in range(len(n)):
