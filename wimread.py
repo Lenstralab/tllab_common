@@ -8,6 +8,7 @@ from datetime import datetime
 import czifile
 import yaml
 from itertools import product
+from collections import deque, OrderedDict
 
 py2 = sys.version_info[0] == 2
 
@@ -33,6 +34,25 @@ def getConfig(file):
         list(u'-+0123456789.'))
     with open(file, 'r') as f:
         return yaml.load(f, loader)
+
+
+class deque_dict(OrderedDict):
+    def __init__(self, maxlen=None, *args, **kwargs):
+        self.maxlen = maxlen
+        super(deque_dict, self).__init__(*args, **kwargs)
+
+    def __truncate__(self):
+        while len(self) > self.maxlen:
+            self.popitem(False)
+
+    def __setitem__(self, *args, **kwargs):
+        super(deque_dict, self).__setitem__(*args, **kwargs)
+        self.__truncate__()
+
+    def update(self, *args, **kwargs):
+        super(deque_dict, self).update(*args, **kwargs)
+        self.__truncate__()
+
 
 def tolist(item):
     if isinstance(item, xmldata):
@@ -314,9 +334,7 @@ class imread:
         self.detector = [0, 1]
         self.metadata = {}
 
-        self.cachesize = 16
-        self.cache = []
-        self.cacheidx = []
+        self.cache = deque_dict(16)
         self._frame_decorator = None
 
         # how far is the center of the frame removed from the center of the sensor
@@ -678,10 +696,8 @@ class imread:
             self.shape = tuple(np.hstack((self.path.shape, 1, 1, 1)))
             cache = np.expand_dims(self.path, 2)
         for i in range(len(self)):
-            self.cache.append(cache[:, :, i])
-        self.cachesize = len(self)
-        z, c, t = np.meshgrid(range(self.shape[3]), range(self.shape[2]), range(self.shape[4]))
-        self.cacheidx = [(C, Z, T) for C, Z, T in zip(c.flatten(), z.flatten(), t.flatten())]
+            self.cache.maxlen = len(self)
+            self.cache[self.czt(i)] = cache[:, :, i]
         self.path = ''
 
     @staticmethod
@@ -713,17 +729,14 @@ class imread:
         if self.filetype == 'ndarray':
             if not 'origcache' in self:
                 self.origcache = self.cache
-                self.origcacheidx = self.cache
             if decorator is None:
                 self.cache = self.origcache
-                self.cacheidx = self.origcacheidx
             else:
-                for i in range(len(self.origcache)):
-                    self.cache[i] = decorator(self, self.cache[i], *self.cacheidx[i])
+                for k, v in self.origcache.items():
+                    self.cache[k] = decorator(self, v, *k)
         else:
             self._frame_decorator = decorator
-            self.cache = []
-            self.cacheidx = []
+            self.cache = deque_dict(self.cache.maxlen)
 
     def __iter__(self):
         self.index = 0
@@ -994,32 +1007,21 @@ class imread:
         t %= self.shape[4]
 
         # cache last n (default 16) frames in memory for speed (~250x faster)
-        if (c, z, t) in self.cacheidx:
-            n = self.cacheidx.index((c, z, t))
-            if len(self) != self.cachesize:
-                self.cacheidx.append(self.cacheidx.pop(n))
-                self.cache.append(self.cache.pop(n))
-                f = self.cache[-1].copy()
-            else:
-                f = self.cache[n].copy()
+        if (c, z, t) in self.cache:
+            self.cache.move_to_end((c, z, t))
+            f = self.cache[(c, z, t)]
         else:
-            self.cacheidx.append((c, z, t))
             if self.dotransform and self.detector[c] == self.masterch:
-                fr = self.__framet__(c, z, t)
+                f = self.__framet__(c, z, t)
             else:
-                fr = self.__frame__(c, z, t)
-            if self.frame_decorator is None:
-                self.cache.append(fr)
-            else:
-                self.cache.append(self.frame_decorator(self, fr, c, z, t))
-            while len(self.cacheidx) > self.cachesize:
-                self.cacheidx.pop(0)
-                self.cache.pop(0)
-            f = self.cache[-1].copy()
+                f = self.__frame__(c, z, t)
+            if self.frame_decorator is not None:
+                f = self.frame_decorator(self, f, c, z, t)
+            self.cache[(c, z, t)] = f
         if not self.dtype is None:
-            return f.astype(self.dtype)
+            return f.copy().astype(self.dtype)
         else:
-            return f
+            return f.copy()
 
     def data(self, c=0, z=0, t=0):
         """ returns 3D stack of frames

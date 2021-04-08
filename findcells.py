@@ -126,7 +126,7 @@ def otsu_local(im, res=16):
         else:
             return d.flatten()[0]
     th = np.zeros((res, res))
-    s = im.shape[0]/res
+    s = im.shape[0]//res
     for i in range(res):
         for j in range(res):
             d = im[i*s:(i+1)*s, j*s:(j+1)*s].flatten()

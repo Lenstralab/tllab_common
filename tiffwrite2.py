@@ -41,8 +41,7 @@ def tiffwrite(file, data, axes='TZCXY', bar=False, colormap=None):
     shape = data.shape[:3]
     with IJTiffWriter(file, shape, data.dtype, colormap) as f:
         at_least_one = False
-        for n in tqdm(product(*[range(i) for i in shape]), total=np.prod(shape),
-                            desc='Saving tiff', disable=not bar):
+        for n in tqdm(product(*[range(i) for i in shape]), total=np.prod(shape), desc='Saving tiff', disable=not bar):
             if np.any(data[n]) or not at_least_one:
                 f.save(data[n], *n)
                 at_least_one = True
@@ -231,15 +230,27 @@ def writer(file, shape, byteorder, bigtiff, Qo, V, W, E, colormap=None, dtype=No
         # lengths in bytes of: header, software, desc, colormap
         header, lengths = makeheader(shape, byteorder, bigtiff, colormap, dtype)
         fh.write(header)
-        while not V.is_set() and not error:
+        fminmax = np.tile((np.inf, -np.inf), (shape[0], 1))
+        while not V.is_set() and not error:  # take frames from queue and write to file
             try:
-                frame, n = Qo.get(True, 0.02)
+                frame, n, fmin, fmax = Qo.get(True, 0.02)
+                fminmax[n[0]] = min(fminmax[n[0]][0], fmin), max(fminmax[n[0]][1], fmax)
                 addframe(frame, n)
             except queues.Empty:
                 continue
             except Exception:
                 E.put(fmt_err(sys.exc_info()))
                 error = True
+
+        if dtype.kind == 'i':
+            dmin, dmax = np.iinfo(dtype).min, np.iinfo(dtype).max
+        else:
+            dmin, dmax = 0, 65535
+        fminmax[np.isposinf(fminmax)] = dmin
+        fminmax[np.isneginf(fminmax)] = dmax
+        for i in range(fminmax.shape[0]):
+            if fminmax[i][0] == fminmax[i][1]:
+                fminmax[i] = dmin, dmax
 
         if len(N) < np.prod(shape):  # add empty frames if needed
             empty_frame = None
@@ -257,6 +268,12 @@ def writer(file, shape, byteorder, bigtiff, Qo, V, W, E, colormap=None, dtype=No
 
         if not error:
             offset_addr = lengths[0] - offsetsize
+
+            # unfortunately, ImageJ doesn't read this from bigTiff, maybe we'll figure out how to force IJ in the future
+            for tag in tifffile.tifffile.imagej_metadata_tag(
+                    {'Ranges': tuple(fminmax.flatten().astype(int))}, byteorder):
+                tags[0][tag[0]] = ({50839: 1, 50838: 4}[tag[0]], tag[3], None)
+
             for framenr in range(nframes):
                 stripbyteoffsets, stripbytecounts = zip(*[strips[(framenr, channel)] for channel in range(spp)])
                 stripbyteoffsets = sum(stripbyteoffsets, [])
@@ -278,7 +295,6 @@ def writer(file, shape, byteorder, bigtiff, Qo, V, W, E, colormap=None, dtype=No
                     fh.write(b'\x00')
                 offset = fh.tell()
                 fh.seek(offset_addr)
-                # if framenr == 0:
                 fh.write(struct.pack(byteorder + offsetformat, offset))
 
                 # write ifd
@@ -305,7 +321,7 @@ def addtagdata(b, byteorder, bigtiff, addr, bvalue):
     b.write(bvalue)
     b.seek(addr)
     b.write(struct.pack(byteorder + offsetformat, tagoffset))
-    b.seek(-1, 2)
+    b.seek(0, 2)
 
 
 def IJTiffFrame(frame, byteorder, bigtiff):
@@ -330,7 +346,8 @@ def compressor(byteorder, bigtiff, Qi, Qo, V, E):
                 if isinstance(frame, tuple):
                     fun, args, kwargs = frame[:3]
                     frame = fun(*args, **kwargs)
-                Qo.put((IJTiffFrame(frame, byteorder, bigtiff), n))
+                Qo.put((IJTiffFrame(frame, byteorder, bigtiff), n,
+                        np.nanmin(np.nanmin(frame.flatten()[frame.flatten()>0])), np.nanmax(frame)))
             except queues.Empty:
                 continue
     except Exception:
