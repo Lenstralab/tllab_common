@@ -346,8 +346,11 @@ def compressor(byteorder, bigtiff, Qi, Qo, V, E):
                 if isinstance(frame, tuple):
                     fun, args, kwargs = frame[:3]
                     frame = fun(*args, **kwargs)
-                Qo.put((IJTiffFrame(frame, byteorder, bigtiff), n,
-                        np.nanmin(np.nanmin(frame.flatten()[frame.flatten()>0])), np.nanmax(frame)))
+                fmin = frame.flatten()
+                fmin = fmin[fmin > 0]
+                fmin = np.nanmin(fmin) if len(fmin) else np.inf
+                fmax = np.nanmax(frame)
+                Qo.put((IJTiffFrame(frame, byteorder, bigtiff), n, fmin, fmax))
             except queues.Empty:
                 continue
     except Exception:
