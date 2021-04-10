@@ -191,7 +191,10 @@ def findcells(im, imnuc=None, cellcolormask=None, ccdist=None, threshold=None, t
             LA = scipy.ndimage.gaussian_filter(LB, smooth, mode='nearest')
         else:
             LA = LB.copy()
-        th = threshold or otsu_local(LA, thres)
+        if threshold is None or isinstance(threshold, str) and threshold.lower() == 'none':
+            th = otsu_local(LA, thres)
+        else:
+            th = float(threshold)
         mask = LA>th
         if minfeatsize>0:
             mask = skimage.morphology.binary_opening(mask, disk(minfeatsize))
