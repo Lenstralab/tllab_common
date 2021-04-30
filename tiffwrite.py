@@ -420,7 +420,7 @@ class IJTiffWriter():
         assert np.all([d.char in 'BbHhf' for d in dtypes]), 'datatype not supported'
         self.bigtiff = True  # normal tiff also possible, but should be opened by bioformats in ImageJ
         self.byteorder = '<'
-        self.nP = nP or min(int(cpu_count() / 6), np.prod(shape))
+        self.nP = nP or max(2, min(cpu_count() // 6, np.prod(shape)))
         self.Qi = Queue(10 * self.nP)
         self.Qo = Queue(10 * self.nP)
         self.E = Queue()
