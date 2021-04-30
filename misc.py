@@ -16,8 +16,11 @@ loader.add_implicit_resolver(
     list(u'-+0123456789.'))
 
 
-def color(text, fmt):
-    """ print colored text: print(color('Hello World!', 'r:b'))
+class color_class(object):
+    """ print colored text:
+            print(color('Hello World!', 'r:b'))
+            print(color % 'r:b' + 'Hello World! + color)
+            print(f'{color("r:b")}Hello World!{color}')
         text: text to be colored/decorated
         fmt: string: 'k': black, 'r': red', 'g': green, 'y': yellow, 'b': blue, 'm': magenta, 'c': cyan, 'w': white
             'b'  text color
@@ -31,35 +34,69 @@ def color(text, fmt):
         wp@tl20191122
     """
 
-    if not isinstance(fmt, str):
-        fmt = str(fmt)
+    def __init__(self, fmt=None):
+        self._open = False
 
-    decorS = [i.group(0) for i in re.finditer('(?<=\:)[a-zA-Z]', fmt)]
-    backcS = [i.group(0) for i in re.finditer('(?<=\.)[a-zA-Z]', fmt)]
-    textcS = [i.group(0) for i in re.finditer('((?<=[^\.\:])|^)[a-zA-Z]', fmt)]
-    backcN = [i.group(0) for i in re.finditer('(?<=\.)\d{1,3}', fmt)]
-    textcN = [i.group(0) for i in re.finditer('((?<=[^\.\:\d])|^)\d{1,3}', fmt)]
+    def _fmt(self, fmt=None):
+        if fmt is None:
+            self._open = False
+            return '\033[0m'
 
-    t = ('k', 'r', 'g', 'y', 'b', 'm', 'c', 'w')
-    d = {'b': 1, 'u': 4, 'r': 7}
+        if not isinstance(fmt, str):
+            fmt = str(fmt)
 
-    for i in decorS:
-        if i.lower() in d:
-            text = '\033[{}m{}'.format(d[i.lower()], text)
-    for i in backcS:
-        if i.lower() in t:
-            text = '\033[48;5;{}m{}'.format(t.index(i.lower()), text)
-    for i in textcS:
-        if i.lower() in t:
-            text = '\033[38;5;{}m{}'.format(t.index(i.lower()), text)
-    for i in backcN:
-        if 0 <= int(i) <= 255:
-            text = '\033[48;5;{}m{}'.format(int(i), text)
-    for i in textcN:
-        if 0 <= int(i) <= 255:
-            text = '\033[38;5;{}m{}'.format(int(i), text)
+        decorS = [i.group(0) for i in re.finditer('(?<=\:)[a-zA-Z]', fmt)]
+        backcS = [i.group(0) for i in re.finditer('(?<=\.)[a-zA-Z]', fmt)]
+        textcS = [i.group(0) for i in re.finditer('((?<=[^\.\:])|^)[a-zA-Z]', fmt)]
+        backcN = [i.group(0) for i in re.finditer('(?<=\.)\d{1,3}', fmt)]
+        textcN = [i.group(0) for i in re.finditer('((?<=[^\.\:\d])|^)\d{1,3}', fmt)]
 
-    return text + '\033[0m'
+        t = 'krgybmcw'
+        d = {'b': 1, 'u': 4, 'r': 7}
+
+        text = ''
+        for i in decorS:
+            if i.lower() in d:
+                text = '\033[{}m{}'.format(d[i.lower()], text)
+        for i in backcS:
+            if i.lower() in t:
+                text = '\033[48;5;{}m{}'.format(t.index(i.lower()), text)
+        for i in textcS:
+            if i.lower() in t:
+                text = '\033[38;5;{}m{}'.format(t.index(i.lower()), text)
+        for i in backcN:
+            if 0 <= int(i) <= 255:
+                text = '\033[48;5;{}m{}'.format(int(i), text)
+        for i in textcN:
+            if 0 <= int(i) <= 255:
+                text = '\033[38;5;{}m{}'.format(int(i), text)
+        if self._open:
+            text = '\033[0m' + text
+        self._open = len(decorS or backcS or textcS or backcN or textcN) > 0
+        return text
+
+    def __mod__(self, fmt):
+        return self._fmt(fmt)
+
+    def __add__(self, text):
+        return self._fmt() + text
+
+    def __radd__(self, text):
+        return text + self._fmt()
+
+    def __str__(self):
+        return self._fmt()
+
+    def __call__(self, *args):
+        if len(args) == 2:
+            return self._fmt(args[1]) + args[0] + self._fmt()
+        else:
+            return self._fmt(args[0])
+
+    def __repr__(self):
+        return self._fmt()
+
+color = color_class()
 
 
 def getConfig(file):
@@ -115,3 +152,16 @@ class objFromDict(dict):
 
     def __dir__(self):
         return self.keys()
+
+
+class none():
+    """ special class to check if an object is some variation of none
+    """
+    def __eq__(self, other):
+        if isinstance(other, none):
+            return True
+        if other is None:
+            return True
+        if hasattr(other, 'lower') and other.lower() == 'none':
+            return True
+        return False

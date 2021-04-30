@@ -1,7 +1,6 @@
 import SimpleITK as sitk
 import yaml, os, pandas
 import numpy as np
-from glob import glob
 from dill import register
 
 if hasattr(yaml, 'full_load'):
@@ -200,7 +199,7 @@ def get_bead_files(im):
         path = os.path.dirname(os.path.dirname(im.path))
     else:
         path = os.path.dirname(im.path)
-    files = sorted(glob(os.path.join(path, 'beads*')))
+    files = sorted([os.path.join(path, f) for f in os.listdir(path) if f.lower().startswith('beads')])
     if not files:
         raise Exception('No bead file found!')
     Files = []

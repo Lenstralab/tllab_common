@@ -411,8 +411,8 @@ class imread:
         self.metadata = tif.imagej_metadata
         P = tif.pages[0]
         self.pndim = P.ndim
-        X = P.imagewidth
-        Y = P.imagelength
+        X = P.imagelength
+        Y = P.imagewidth
         if self.pndim == 3:
             C = P.samplesperpixel
         else:
