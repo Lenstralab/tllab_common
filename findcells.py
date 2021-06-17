@@ -221,8 +221,8 @@ def findcells(im, imnuc=None, cellcolormask=None, ccdist=None, threshold=None, t
     if imnuc is None: #only one channel
         mask, LA = make_mask(im, threshold, thres, smooth, minfeatsize, dilate)
         pk = skimage.feature.peak_local_max(fill_nan(LA), footprint=disk(ccdist), exclude_border=False)
-        pk = np.array(sorted([q.tolist() for q in pk])[::-1])
         pk = maskpk(pk, mask)
+        pk = np.array(sorted([q.tolist() for q in pk])[::-1])
         markers = np.zeros(im.shape)
         for i in range(pk.shape[0]):
             if cellcolormask is None:

@@ -308,7 +308,6 @@ def writer(file, shape, byteorder, bigtiff, W, colormap=None, dtype=None):
 
             offset_addr = offset - offsetsize
 
-            tags[0][305] = (2, b'tiffwrite_tllab_NKI')
             if not colormap is None:
                 tags[0][320] = (3, get_colormap(colormap, dtype, byteorder))
                 tags[0][262] = (3, [3])
@@ -321,6 +320,7 @@ def writer(file, shape, byteorder, bigtiff, W, colormap=None, dtype=None):
             for framenr in range(nframes):
                 stripbyteoffsets, stripbytecounts = zip(*[strips[(framenr, channel)] for channel in range(spp)])
                 tp, value = tags[framenr][258]
+                tags[framenr][305] = (2, b'tiffwrite_tllab_NKI')
                 tags[framenr][258] = (tp, spp * value)
                 tags[framenr][270] = (2, description)
                 tags[framenr][273] = (16, sum(stripbyteoffsets, []))
@@ -341,7 +341,7 @@ def writer(file, shape, byteorder, bigtiff, W, colormap=None, dtype=None):
                 fh.write(struct.pack(byteorder + tagnoformat, len(tags[framenr])))
                 tagdata = [addtag(code, *tags[framenr][code]) for code in sorted(tags[framenr].keys())]
                 offset_addr = fh.tell()
-                fh.write(b'\x00' * tagsize)
+                fh.write(b'\x00' * offsetsize)
                 for i in [j for j in tagdata if j is not None]:
                     addtagdata(*i)
             fh.seek(offset_addr)
