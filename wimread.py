@@ -8,7 +8,7 @@ from datetime import datetime
 import czifile
 import yaml
 from itertools import product
-from collections import deque, OrderedDict
+from collections import OrderedDict
 
 py2 = sys.version_info[0] == 2
 

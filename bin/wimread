@@ -20,11 +20,12 @@ if __name__ == '__main__':
         with imread(args.file, transform=args.register) as im:
             print(im.summary)
             if args.out:
-                if not os.path.exists(os.path.dirname(args.out)):
-                    os.makedirs(args.out)
-                if os.path.exists(args.out) and not args.force:
+                out = os.path.abspath(args.out)
+                if not os.path.exists(os.path.dirname(out)):
+                    os.makedirs(os.path.dirname(out))
+                if os.path.exists(out) and not args.force:
                     print('File {} exists already, add the -f flag if you want to overwrite it.'.format(args.out))
                 else:
-                    im.save_as_tiff(args.out, args.channel, args.zslice, args.time, args.split)
+                    im.save_as_tiff(out, args.channel, args.zslice, args.time, args.split)
     else:
         print('File does not exist.')

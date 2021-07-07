@@ -1,3 +1,4 @@
+import os
 import re
 import yaml
 from copy import deepcopy
@@ -104,6 +105,47 @@ def getConfig(file):
     """
     with open(file, 'r') as f:
         return yaml.load(f, loader)
+
+
+def getParams(parameterfile, templatefile, required=None):
+    """ Load parameters from a parameterfile and parameters missing from that from the templatefile. Raise an error when
+        parameters in required are missing. Return a dictionary with the parameters.
+    """
+    params = getConfig(parameterfile)
+
+    # recursively load more parameters from another file
+    def moreParams(params, file):
+        if not params.get('moreParams') == none():
+            if os.path.isabs(params['moreParams']):
+                moreParamsFile = params['moreParams']
+            else:
+                moreParamsFile = os.path.join(os.path.dirname(os.path.abspath(file)), params['moreParams'])
+            print(color('Loading more parameters from {}'.format(moreParamsFile), 'g'))
+            mparams = getConfig(moreParamsFile)
+            moreParams(mparams, file)
+            for k, v in mparams.items():
+                if k not in params:
+                    params[k] = v
+
+    moreParams(params, parameterfile)
+
+    #  convert string nones to type None
+    for k, v in params.items():
+        if v == none():
+            params[k] = None
+
+    if required is not None:
+        for p in required:
+            if p not in params:
+                raise Exception('Parameter {} not given in parameter file.'.format(p))
+
+    template = getConfig(templatefile)
+    for k, v in template.items():
+        if k not in params and not v == none():
+            print(color('Parameter {} missing in parameter file, adding with default value: {}.'.format(k, v), 'r'))
+            params[k] = v
+
+    return params
 
 
 def convertParamFile2YML(file):

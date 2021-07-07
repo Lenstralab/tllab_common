@@ -10,11 +10,14 @@ Displays information (pixel size, interval time etc.) about the image file.
 python-javabridge is required, which requires java, for ubuntu:
 
     sudo apt install openjdk-8-jdk-headless
-    sudo update-alternatives --config
+
+Set java 8 as default java: 
+
+    sudo update-alternatives --config java
 
 Then this code can be installed as a package:
 
-    sudo pip install /path/to/tllab_common --upgrade.
+    sudo pip install /path/to/tllab_common --upgrade
 or:
 
     pip install -e /path/to/tllab_common --user

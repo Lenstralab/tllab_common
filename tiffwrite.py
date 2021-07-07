@@ -11,6 +11,7 @@ from itertools import product
 from collections import OrderedDict
 from multipledispatch import dispatch
 from numbers import Number
+from fractions import Fraction
 
 try:
     strtype = (str, unicode)  # python 2
@@ -28,7 +29,7 @@ def get_colormap(colormap, dtype='int8', byteorder='<'):
     return b''.join([struct.pack(byteorder + 'H', c) for c in colormap.T.flatten()])
 
 
-def tiffwrite(file, data, axes='TZCXY', bar=False, colormap=None):
+def tiffwrite(file, data, axes='TZCXY', bar=False, colormap=None, pxsize=None):
     """ Saves an image using the bigtiff format, openable in ImageJ as hyperstack
         Uses multiple processes to quickly compress as good as possible
         file: filename of the new tiff file
@@ -47,7 +48,7 @@ def tiffwrite(file, data, axes='TZCXY', bar=False, colormap=None):
             data = np.expand_dims(data, e)
 
     shape = data.shape[:3]
-    with IJTiffWriter(file, shape, data.dtype, colormap) as f:
+    with IJTiffWriter(file, shape, data.dtype, colormap, pxsize=pxsize) as f:
         at_least_one = False
         for n in tqdm(product(*[range(i) for i in shape]), total=np.prod(shape), desc='Saving tiff', disable=not bar):
             if np.any(data[n]) or not at_least_one:
@@ -149,7 +150,7 @@ def fmt_err(exc_info):
 
 def multiplexer(files, byteorder, bigtiff, Qo, V, W, E):
     try:
-        w = {file: writer(file, v['shape'], byteorder, bigtiff, W, v['colormap'], v['dtype'])
+        w = {file: writer(file, v['shape'], byteorder, bigtiff, W, v['colormap'], v['dtype'], v['extratags'])
              for file, v in files.items()}
         for v in w.values():  # start writing all files
             next(v)
@@ -165,7 +166,7 @@ def multiplexer(files, byteorder, bigtiff, Qo, V, W, E):
         E.put(fmt_err(sys.exc_info()))
 
 
-def writer(file, shape, byteorder, bigtiff, W, colormap=None, dtype=None):
+def writer(file, shape, byteorder, bigtiff, W, colormap=None, dtype=None, extratags=None):
     """ Writes a tiff file, writer function for IJTiffWriter
         file:      filename of the new tiff file
         shape:     shape (CZT) of the data to be written
@@ -186,6 +187,13 @@ def writer(file, shape, byteorder, bigtiff, W, colormap=None, dtype=None):
     hashes = {}
     N = []
 
+    def hashcheck(bvalue, offset):
+        addr = fh.tell()
+        fh.seek(offset)
+        same = bvalue == fh.read(len(bvalue))
+        fh.seek(addr)
+        return same
+
     def frn(n):
         if colormap is None:
             return n[1] + n[2] * shape[1], n[0]
@@ -198,7 +206,7 @@ def writer(file, shape, byteorder, bigtiff, W, colormap=None, dtype=None):
         stripbyteoffsets = []
         for c in chunks:
             hc = hash(c)
-            if hc in hashes:  # reuse previously saved data
+            if hc in hashes and hashcheck(c, hashes[hc]):  # reuse previously saved data
                 stripbyteoffsets.append(hashes[hc])
             else:
                 if fh.tell() % 2:
@@ -213,6 +221,8 @@ def writer(file, shape, byteorder, bigtiff, W, colormap=None, dtype=None):
         return framenr, channel
 
     def addtag(code, ttype, value):
+        if isinstance(ttype, str):
+            ttype = tifffile.TIFF.DATATYPES[ttype.upper()]
         dtype = tifffile.TIFF.DATA_FORMATS[ttype]
         count = len(value) // struct.calcsize(dtype) if isinstance(value, (bytes, strtype)) else len(value)
         offset = fh.tell()
@@ -227,7 +237,7 @@ def writer(file, shape, byteorder, bigtiff, W, colormap=None, dtype=None):
             bvalue = b''.join([struct.pack(byteorder + dtype, *v) for v in value])
         else:
             bvalue = b''.join([struct.pack(byteorder + dtype, v) for v in value])
-        if count * struct.calcsize(dtype) <= offsetsize:
+        if len(bvalue) <= offsetsize:
             fh.write(bvalue)
             tagdata = None
         else:
@@ -239,7 +249,7 @@ def writer(file, shape, byteorder, bigtiff, W, colormap=None, dtype=None):
         if fh.tell() % 2:
             fh.write(b'\x00')
         hc = hash(bvalue)
-        if hc in hashes:
+        if hc in hashes and hashcheck(bvalue, hashes[hc]):
             tagoffset = hashes[hc]
         else:
             tagoffset = fh.tell()
@@ -262,7 +272,7 @@ def writer(file, shape, byteorder, bigtiff, W, colormap=None, dtype=None):
     except:
         pass
 
-    with open(file, 'wb') as fh:
+    with open(file, 'w+b') as fh:
         try:
             fh.write({'<': b'II', '>': b'MM'}[byteorder])
             if bigtiff:
@@ -320,12 +330,14 @@ def writer(file, shape, byteorder, bigtiff, W, colormap=None, dtype=None):
             for framenr in range(nframes):
                 stripbyteoffsets, stripbytecounts = zip(*[strips[(framenr, channel)] for channel in range(spp)])
                 tp, value = tags[framenr][258]
-                tags[framenr][305] = (2, b'tiffwrite_tllab_NKI')
                 tags[framenr][258] = (tp, spp * value)
                 tags[framenr][270] = (2, description)
                 tags[framenr][273] = (16, sum(stripbyteoffsets, []))
                 tags[framenr][277] = (3, [spp])
                 tags[framenr][279] = (16, sum(stripbytecounts, []))
+                tags[framenr][305] = (2, b'tiffwrite_tllab_NKI')
+                if extratags is not None:
+                    tags[framenr].update(extratags)
                 if colormap is None and shape[0] > 1:
                     tags[framenr][284] = (3, [2])
 
@@ -399,11 +411,22 @@ class IJTiffWriter():
         c, z, t: color, z, time coordinates of the frame
     """
 
-    def __init__(self, file, shape, dtype='uint16', colormap=None, nP=None):
+    # TODO: better error handling
+    # TODO: extratags per frame, handled by save method
+    # TODO: extratags sanity check
+
+    def __init__(self, file, shape, dtype='uint16', colormap=None, nP=None, extratags=None, pxsize=None):
         files = [file] if isinstance(file, strtype) else file
         shapes = [shape] if isinstance(shape[0], Number) else shape  # CZT
         dtypes = [np.dtype(dtype)] if isinstance(dtype, (strtype, np.dtype)) else [np.dtype(d) for d in dtype]
         colormaps = [colormap] if colormap is None or isinstance(colormap, strtype) else colormap
+        extratagss = [extratags] if extratags is None or isinstance(extratags, dict) else extratags
+        pxsizes = [pxsize] if pxsize is None or isinstance(pxsize, Number) else pxsize
+        for i, pxsize in enumerate(pxsizes):
+            if pxsize is not None:
+                res = Fraction(pxsize).limit_denominator(2 ** 31 - 1)
+                res = [res.denominator, res.numerator]
+                extratagss[i] = {**(extratagss[i] or {}), **{282: (5, [res]), 283: (5, [res])}}
 
         nFiles = len(files)
         if not len(shapes) == nFiles:
@@ -413,8 +436,9 @@ class IJTiffWriter():
         if not len(colormaps) == nFiles:
             colormaps *= nFiles
 
-        self.files = OrderedDict((file, {'shape': shape, 'dtype': dtype, 'colormap': colormap, 'frames': []})
-                                 for file, shape, dtype, colormap in zip(files, shapes, dtypes, colormaps))
+        self.files = OrderedDict((file,
+                    {'shape': shape, 'dtype': dtype, 'colormap': colormap, 'frames': [], 'extratags': extratags})
+                    for file, shape, dtype, colormap, extratags in zip(files, shapes, dtypes, colormaps, extratagss))
 
         assert np.all([len(s) == 3 for s in shapes]), 'please specify all c, z, t for the shape'
         assert np.all([d.char in 'BbHhf' for d in dtypes]), 'datatype not supported'
