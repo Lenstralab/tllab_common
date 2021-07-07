@@ -435,10 +435,13 @@ class IJTiffWriter():
             dtypes *= nFiles
         if not len(colormaps) == nFiles:
             colormaps *= nFiles
+        if not len(extratagss) == nFiles:
+            extratagss *= nFiles
 
         self.files = OrderedDict((file,
                     {'shape': shape, 'dtype': dtype, 'colormap': colormap, 'frames': [], 'extratags': extratags})
-                    for file, shape, dtype, colormap, extratags in zip(files, shapes, dtypes, colormaps, extratagss))
+                    for file, shape, dtype, colormap, extratags in zip(files, shapes, dtypes, colormaps, extratagss)
+                                 if len(file))
 
         assert np.all([len(s) == 3 for s in shapes]), 'please specify all c, z, t for the shape'
         assert np.all([d.char in 'BbHhf' for d in dtypes]), 'datatype not supported'
