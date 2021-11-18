@@ -164,6 +164,8 @@ class Transform:
             self._last = self.asdict()
             self._inverse = Transform(self.asdict())
             self._inverse.transform = self._inverse.transform.GetInverse()
+            self._inverse._last = self._inverse.asdict()
+            self._inverse._inverse = self
         return self._inverse
 
     def adapt(self, origin, shape):
@@ -198,7 +200,7 @@ class Transform:
                 array[columns] = self.coords(np.atleast_2d(array[columns].to_numpy()))[0]
             return array
         else:  # somehow we need to use the inverse here to get the same effect as when using self.frame
-            return np.array([self.transform.GetInverse().TransformPoint(i.tolist()) for i in np.asarray(array)])
+            return np.array([self.inverse.transform.TransformPoint(i.tolist()) for i in np.asarray(array)])
 
     def save(self, file):
         """ save the parameters of the transform calculated

@@ -107,7 +107,7 @@ def getConfig(file):
         return yaml.load(f, loader)
 
 
-def getParams(parameterfile, templatefile, required=None):
+def getParams(parameterfile, templatefile=None, required=None):
     """ Load parameters from a parameterfile and parameters missing from that from the templatefile. Raise an error when
         parameters in required are missing. Return a dictionary with the parameters.
     """
@@ -139,11 +139,11 @@ def getParams(parameterfile, templatefile, required=None):
             if p not in params:
                 raise Exception('Parameter {} not given in parameter file.'.format(p))
 
-    template = getConfig(templatefile)
-    for k, v in template.items():
-        if k not in params and not v == none():
-            print(color('Parameter {} missing in parameter file, adding with default value: {}.'.format(k, v), 'r'))
-            params[k] = v
+    if templatefile is not None:
+        for k, v in getConfig(templatefile).items():
+            if k not in params and not v == none():
+                print(color('Parameter {} missing in parameter file, adding with default value: {}.'.format(k, v), 'r'))
+                params[k] = v
 
     return params
 

@@ -523,6 +523,3 @@ class IJTiffWriter():
 
     def __exit__(self, *args, **kwargs):
         self.close()
-
-
-IJTiffWriterMulti = IJTiffWriter
