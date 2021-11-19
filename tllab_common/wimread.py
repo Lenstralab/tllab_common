@@ -2,7 +2,6 @@
 
 import os
 import re
-import psutil
 import inspect
 import json
 
@@ -11,19 +10,21 @@ import untangle
 import javabridge
 import bioformats
 import pandas
-import numpy as np
-from tqdm.auto import tqdm
 import tifffile
-from datetime import datetime
 import czifile
 import yaml
+import numpy as np
+import matplotlib.pyplot as plt
+from datetime import datetime
+from tqdm.auto import tqdm
 from itertools import product
 from collections import OrderedDict
+from abc import ABCMeta, abstractmethod
+from functools import cached_property
 from parfor import parfor
 from tllab_common.tiffwrite import IJTiffWriter
 from tllab_common.transforms import Transform, Transforms
 from tllab_common.tools import fitgauss
-import matplotlib.pyplot as plt
 
 
 class jvm:
@@ -32,6 +33,7 @@ class jvm:
     _instance = None
     vm_started = False
     vm_killed = False
+
     def __new__(cls, *args):
         if cls._instance is None:
             cls._instance = object.__new__(cls)
@@ -117,7 +119,7 @@ class ImTransforms(ImTransformsExtra):
                 with imread(file) as im:  # check for errors opening the file
                     pass
                 Files.append(file)
-            except:
+            except Exception:
                 continue
         if not Files:
             raise Exception('No bead file found!')
@@ -213,7 +215,7 @@ class ImShiftTransforms(ImTransformsExtra):
             self.impath = im.path
             self.path = os.path.splitext(self.impath)[0] + '_shifts.txt'
             self.tracks, self.detectors, self.files = im.track, im.detector, im.beadfile
-            if not shifts is None:
+            if shifts is not None:
                 if isinstance(shifts, np.ndarray):
                     self.shifts = shifts
                     self.shifts2transforms(im)
@@ -255,6 +257,7 @@ class ImShiftTransforms(ImTransformsExtra):
     def calulate_shifts0(self, im):
         """ Calculate shifts relative to the first frame """
         im0 = im[:, 0, 0].squeeze().transpose(2, 0, 1)
+
         @parfor(range(1, im.shape[4]), (im, im0), desc='Calculating image shifts.')
         def fun(t, im, im0):
             return Transform(im0, im[:, 0, t].squeeze().transpose(2, 0, 1), 'translation')
@@ -340,7 +343,7 @@ class xmldata(OrderedDict):
     @staticmethod
     def _search(d, key, regex=False, default=None, *args, **kwargs):
         if isinstance(key, (list, tuple)):
-            if len(key)==1:
+            if len(key) == 1:
                 key = key[0]
             else:
                 for v in xmldata._search_all(d, key[0], regex, *args, **kwargs)[1]:
@@ -401,7 +404,7 @@ class xmldata(OrderedDict):
             idx = [int(i) for i in re.findall('(?<=:)\d+$', k)]
             if idx:
                 key = re.findall('^.*(?=:\d+$)', k)[0]
-                if not key in d2:
+                if key not in d2:
                     d2[key] = {}
                 d2[key][idx[0]] = d['{}:{}'.format(key, idx[0])]
             else:
@@ -439,7 +442,7 @@ class xmldata(OrderedDict):
             d = elem.Value.cdata
             return name, d
 
-        if hasattr(elem, '_attributes') and not elem._attributes is None and 'ID' in elem._attributes:
+        if hasattr(elem, '_attributes') and elem._attributes is not None and 'ID' in elem._attributes:
             name = elem._attributes['ID']
             elem._attributes.pop('ID')
         elif hasattr(elem, '_name'):
@@ -493,8 +496,15 @@ class xmldata(OrderedDict):
         return xmldata(value) if isinstance(value, dict) else value
 
 
-class imread:
-    ''' class to read image files, while taking good care of important metadata,
+# class PostInitCaller(ABCMeta):
+#     def __call__(cls, *args, **kwargs):
+#         obj = type.__call__(cls, *args, **kwargs)
+#         obj.__post_init__()
+#         return obj
+
+
+class imread(metaclass=ABCMeta):
+    """ class to read image files, while taking good care of important metadata,
             currently optimized for .czi files, but can open anything that bioformats can handle
         path: path to the image file
         optional:
@@ -539,19 +549,23 @@ class imread:
         Subclassing:
             Subclass this class to add more file types. A subclass should always have at least the following methods:
                 staticmethod _can_open(path): returns True when the subclass can open the image in path
-                __init__(self, ...), the first thing this should do is call
-                    super().__init__(path, series, transform, drift, beadfile, dtype, meta)
-                    then it can pull some metadata from the file and do other format specific things, finally, it should
-                    call self.__init__continued__()
+                __metadata__(self): pulls some metadata from the file and do other format specific things, it needs to
+                                    define a few properties, like shape, etc.
                 __frame__(self, c, z, t): this should return a single frame at channel c, slice z and time t
-                close(self): Optional: close the file in a proper way
+                optional close(self): close the file in a proper way
                 Any other method can be overridden as needed
         wp@tl2019-2021
-    '''
+    """
     @staticmethod
+    @abstractmethod
     def _can_open(path):  # Override this method, and return true when the subclass can open the file
         return False
 
+    @abstractmethod
+    def __metadata__(self):
+        return
+
+    @abstractmethod
     def __frame__(self, c, z, t):  # Override this, return the frame at c, z, t
         return np.random.randint(0, 255, self.shape[:2])
 
@@ -612,7 +626,8 @@ class imread:
         self._frame_decorator = None
         self.frameoffset = (self.shape[0] / 2, self.shape[1] / 2)  # how far apart the centers of frame and sensor are
 
-    def __init__continued__(self):
+        self.__metadata__()
+
         self.timeseries = self.shape[4] > 1
         self.zstack = self.shape[3] > 1
         if not hasattr(self, 'cnamelist'):
@@ -716,17 +731,8 @@ class imread:
 
     @frame_decorator.setter
     def frame_decorator(self, decorator):
-        if self.filetype == 'ndarray':
-            if not 'origcache' in self:
-                self.origcache = self.cache
-            if decorator is None:
-                self.cache = self.origcache
-            else:
-                for k, v in self.origcache.items():
-                    self.cache[k] = decorator(self, v, *k)
-        else:
-            self._frame_decorator = decorator
-            self.cache = deque_dict(self.cache.maxlen)
+        self._frame_decorator = decorator
+        self.cache = deque_dict(self.cache.maxlen)
 
     def __iter__(self):
         self.index = 0
@@ -814,10 +820,10 @@ class imread:
         n = list(n)
 
         ell = [i for i, e in enumerate(n) if isinstance(e, type(Ellipsis))]
-        if len(ell)>1:
+        if len(ell) > 1:
             raise IndexError("an index can only have a single ellipsis ('Ellipsis')")
         if len(ell):
-            if len(n)>5:
+            if len(n) > 5:
                 n.remove(Ellipsis)
             else:
                 n[ell[0]] = slice(0, -1, 1)
@@ -864,7 +870,7 @@ class imread:
             c = n % self.shape[2]
             z = (n // self.shape[2]) % self.shape[3]
             t = (n // (self.shape[2] * self.shape[3])) % self.shape[4]
-            return (c, z, t)
+            return c, z, t
         n = list(n)
         if len(n) == 2 or len(n) == 4:
             n.append(slice(0, -1, 1))
@@ -961,8 +967,8 @@ class imread:
         return self.sum(c, z, t) / np.prod([len(i) for i in self.get_czt(c, z, t)])
 
     def nanmean(self, c=None, z=None, t=None):
-         return self.nansum(c, z, t) / (np.prod([len(i) for i in self.get_czt(c, z, t)])
-                                        - self._stats(np.sum, c, z, t, lambda im: np.isnan(im)))
+        return self.nansum(c, z, t) / (np.prod([len(i) for i in self.get_czt(c, z, t)])
+                                       - self._stats(np.sum, c, z, t, lambda im: np.isnan(im)))
 
     @property
     def dtype(self):
@@ -977,8 +983,8 @@ class imread:
             return channel_name
         else:
             c = [i for i, c in enumerate(self.cnamelist) if c.lower().startswith(channel_name.lower())]
-            assert len(c)>0, 'Channel {} not found in {}'.format(c, self.cnamelist)
-            assert len(c)<2, 'Channel {} not unique in {}'.format(c, self.cnamelist)
+            assert len(c) > 0, 'Channel {} not found in {}'.format(c, self.cnamelist)
+            assert len(c) < 2, 'Channel {} not unique in {}'.format(c, self.cnamelist)
             return c[0]
 
     def frame(self, c=0, z=0, t=0):
@@ -998,7 +1004,7 @@ class imread:
             if self.frame_decorator is not None:
                 f = self.frame_decorator(self, f, c, z, t)
             self.cache[(c, z, t)] = f
-        if not self.dtype is None:
+        if self.dtype is not None:
             return f.copy().astype(self.dtype)
         else:
             return f.copy()
@@ -1013,13 +1019,13 @@ class imread:
         """ returns 5D block of frames
         """
         x, y, c, z, t = [np.arange(self.shape[i]) if e is None else np.array(e, ndmin=1)
-                         for i, e in enumerate((c, z, t))]
+                         for i, e in enumerate((x, y, c, z, t))]
         d = np.full((len(x), len(y), len(c), len(z), len(t)), np.nan)
         for (ci, cj), (zi, zj), (ti, tj) in product(enumerate(c), enumerate(z), enumerate(t)):
             d[:, :, ci, zi, ti] = self.frame(cj, zj, tj)[x][:, y]
         return d
 
-    @property
+    @cached_property
     def timeval(self):
         if hasattr(self, 'metadata') and isinstance(self.metadata, xmldata):
             image = self.metadata.search('Image')
@@ -1029,11 +1035,11 @@ class imread:
         else:
             return (np.arange(self.shape[4]) * self.settimeinterval).tolist()
 
-    @property
+    @cached_property
     def timeinterval(self):
         return float(np.diff(self.timeval).mean())
 
-    @property
+    @cached_property
     def piezoval(self):
         """ gives the height of the piezo and focus motor, only available when CylLensGUI was used
         """
@@ -1063,7 +1069,7 @@ class imread:
         # Or maybe in an extra '.pzl' file
         else:
             m = self.extrametadata
-            if not m is None and 'p' in m:
+            if m is not None and 'p' in m:
                 q = np.array(m['p'])
                 if not len(q.shape):
                     q = np.zeros((1, 3))
@@ -1087,7 +1093,7 @@ class imread:
         df = df[~df.duplicated('frame', 'last')]
         return df
 
-    @property
+    @cached_property
     def extrametadata(self):
         if isinstance(self.path, str) and len(self.path) > 3:
             if os.path.isfile(self.path[:-3] + 'pzl2'):
@@ -1098,7 +1104,7 @@ class imread:
                 return
             try:
                 return self.getConfig(pname)
-            except:
+            except Exception:
                 return
         return
 
@@ -1136,7 +1142,7 @@ class imread:
                         tif.save(self(*m), *i)
                         at_least_one = True
 
-    @property
+    @cached_property
     def summary(self):
         return self.__repr__()
 
@@ -1146,8 +1152,10 @@ class cziread(imread):
     def _can_open(path):
         return isinstance(path, str) and path.endswith('.czi')
 
-    def __init__(self, path, series=0, transform=False, drift=False, beadfile=None, dtype=None, meta=None):
-        super().__init__(path, series, transform, drift, beadfile, dtype, meta)
+    # def __init__(self, path, series=0, transform=False, drift=False, beadfile=None, dtype=None, meta=None):
+    #     super().__init__(path, series, transform, drift, beadfile, dtype, meta)
+
+    def __metadata__(self):
         # TODO: make sure frame function still works when a subblock has data from more than one frame
         self.reader = czifile.CziFile(self.path)
         # self.reader.asarray()
@@ -1173,11 +1181,11 @@ class cziread(imread):
             image = self.metadata
 
         pxsize = image.search('ScalingX')[0]
-        if not pxsize is None:
+        if pxsize is not None:
             self.pxsize = pxsize * 1e6
         if self.zstack:
             deltaz = image.search('ScalingZ')[0]
-            if not deltaz is None:
+            if deltaz is not None:
                 self.deltaz = deltaz * 1e6
 
         self.title = self.metadata.re_search(('Information', 'Document', 'Name'), self.title)[0]
@@ -1218,7 +1226,7 @@ class cziread(imread):
         self.cnamelist = [c['DetectorSettings']['Detector']['Id'] for c in
                           self.metadata['ImageDocument']['Metadata']['Information'].search('Channel')]
         self.track, self.detector = zip(*[[int(i) for i in re.findall('\d', c)] for c in self.cnamelist])
-        self.__init__continued__()
+        # self.__init__continued__()
 
     def __frame__(self, c=0, z=0, t=0):
         f = np.zeros(self.shape[:2], self.dtype)
@@ -1234,10 +1242,11 @@ class cziread(imread):
     def close(self):
         self.reader.close()
 
-    def get_index(self, directory_entry, start):
+    @staticmethod
+    def get_index(directory_entry, start):
         return [(i - j, i - j + k) for i, j, k in zip(directory_entry.start, start, directory_entry.shape)]
 
-    @property
+    @cached_property
     def timeval(self):
         tval = np.unique(list(filter(lambda x: x.attachment_entry.filename.startswith('TimeStamp'),
                                      self.reader.attachments()))[0].data())
@@ -1249,16 +1258,17 @@ class seqread(imread):
     def _can_open(path):
         return isinstance(path, str) and os.path.splitext(path)[1] == ''
 
-    def __init__(self, path, series=0, transform=False, drift=False, beadfile=None, dtype=None, meta=None):
-        super().__init__(path, series, transform, drift, beadfile, dtype, meta)
+    def __metadata__(self):
         jvm().start_vm()
         with open(os.path.join(self.path, 'metadata.txt'), 'r') as metadatafile:
             metadata = metadatafile.read()
 
         self.metadata = xmldata(json.loads(metadata))
+
+        # compare channel names from metadata with filenames
         filelist = os.listdir(self.path)
         cnamelist = self.metadata.search('ChNames')
-        cnamelist = [c for c in cnamelist if any([c in f for f in filelist])] #compare channel names from metadata with filenames
+        cnamelist = [c for c in cnamelist if any([c in f for f in filelist])]
 
         rm = []
         for file in filelist:
@@ -1328,7 +1338,6 @@ class seqread(imread):
             a = re.search('\d?\d*[,\.]?\d+(?=x$)', o)
             if hasattr(a, 'group'):
                 self.optovar.append(float(a.group(0).replace(',', '.')))
-        self.__init__continued__()
 
     def __frame__(self, c=0, z=0, t=0):
         return tifffile.imread(os.path.join(self.path, self.filedict[(c, z, t)]))
@@ -1342,8 +1351,10 @@ class bfread(imread):
     def _can_open(path):
         return True
 
-    def __init__(self, path, series=0, transform=False, drift=False, beadfile=None, dtype=None, meta=None):
-        super().__init__(path, series, transform, drift, beadfile, dtype, meta)
+    # def __init__(self, path, series=0, transform=False, drift=False, beadfile=None, dtype=None, meta=None):
+    #     super().__init__(path, series, transform, drift, beadfile, dtype, meta)
+
+    def __metadata__(self):
         jvm().start_vm()  # We need java for this :(
         self.key = np.random.randint(1e9)
         self.reader = bioformats.get_image_reader(self.key, self.path)
@@ -1375,13 +1386,13 @@ class bfread(imread):
 
         pxsizeunit = image.search('PhysicalSizeXUnit')[0]
         pxsize = image.search('PhysicalSizeX')[0]
-        if not pxsize is None:
+        if pxsize is not None:
             self.pxsize = pxsize / unit(pxsizeunit) * 1e6
 
         if self.zstack:
             deltazunit = image.search('PhysicalSizeZUnit')[0]
             deltaz = image.search('PhysicalSizeZ')[0]
-            if not deltaz is None:
+            if deltaz is not None:
                 self.deltaz = deltaz / unit(deltazunit) * 1e6
 
         if not isinstance(self, bfread):
@@ -1406,7 +1417,7 @@ class bfread(imread):
             self.NA = self.metadata.search('NumericalAperture', 1.47)[0]
             self.title = self.metadata.search('Name', self.title)
             self.binning = self.metadata.search('BinningX', 1)[0]
-        self.__init__continued__()
+        # self.__init__continued__()
 
     def __frame__(self, *args):
         frame = self.reader.read(*args, rescale=False).astype('float')
@@ -1424,8 +1435,10 @@ class ndread(imread):
     def _can_open(path):
         return isinstance(path, np.ndarray) and path.ndim in (2, 3, 5)
 
-    def __init__(self, path, series=0, transform=False, drift=False, beadfile=None, dtype=None, meta=None):
-        super().__init__(path, series, transform, drift, beadfile, dtype, meta)
+    # def __init__(self, path, series=0, transform=False, drift=False, beadfile=None, dtype=None, meta=None):
+    #     super().__init__(path, series, transform, drift, beadfile, dtype, meta)
+
+    def __metadata__(self):
         assert isinstance(self.path, np.ndarray), 'Not a numpy array'
         if np.ndim(self.path) == 5:
             self.shape = self.path.shape
@@ -1435,7 +1448,7 @@ class ndread(imread):
             self.shape = self.path.shape + (1, 1, 1)
         self.title = 'numpy array'
         self.acquisitiondate = 'now'
-        self.__init__continued__()
+        # self.__init__continued__()
 
     def __frame__(self, c, z, t):
         if self.path.ndim == 5:
@@ -1453,6 +1466,20 @@ class ndread(imread):
     def __str__(self):
         return self.path.__str__()
 
+    @property
+    def frame_decorator(self):
+        return self._frame_decorator
+
+    @frame_decorator.setter
+    def frame_decorator(self, decorator):
+        if 'origcache' not in self:
+            self.origcache = self.cache
+        if decorator is None:
+            self.cache = self.origcache
+        else:
+            for k, v in self.origcache.items():
+                self.cache[k] = decorator(self, v, *k)
+
 
 class tiffread(imread):
     @staticmethod
@@ -1463,9 +1490,11 @@ class tiffread(imread):
         else:
             return False
 
-    def __init__(self, path, series=0, transform=False, drift=False, beadfile=None, dtype=None, meta=None):
-        super().__init__(path, series, transform, drift, beadfile, dtype, meta)
-        self.tif = tifffile.TiffFile(path)
+    # def __init__(self, path, series=0, transform=False, drift=False, beadfile=None, dtype=None, meta=None):
+    #     super().__init__(path, series, transform, drift, beadfile, dtype, meta)
+
+    def __metadata__(self):
+        self.tif = tifffile.TiffFile(self.path)
         self.metadata = self.tif.imagej_metadata
         P = self.tif.pages[0]
         self.pndim = P.ndim
@@ -1483,7 +1512,7 @@ class tiffread(imread):
         self.timeseries = self.shape[4] > 1
         self.zstack = self.shape[3] > 1
         # TODO: more metadata
-        self.__init__continued__()
+        # self.__init__continued__()
 
     def __frame__(self, c, z, t):
         if self.pndim == 3:
