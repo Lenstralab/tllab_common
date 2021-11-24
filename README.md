@@ -17,7 +17,9 @@ Set java 8 as default java:
 
 Then this code can be installed as a package:
 
-    sudo pip install /path/to/tllab_common --upgrade
-or:
+    sudo pip install git+https://gitlab.rhpc.nki.nl/LenstraLab/tllab_common.git
 
-    pip install -e /path/to/tllab_common --user
+or editable:
+
+    git clone https://gitlab.rhpc.nki.nl/LenstraLab/tllab_common.git 
+    pip install -e tllab_common/ --user

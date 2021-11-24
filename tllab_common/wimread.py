@@ -605,8 +605,6 @@ class imread(metaclass=ABCMeta):
         self.exposuretime = (0,)
         self.deltaz = 1
         self.pcf = (1, 1)
-        self.timeseries = False
-        self.zstack = False
         self.laserwavelengths = [[]]
         self.laserpowers = [[]]
         self.powermode = 'normal'
@@ -628,8 +626,6 @@ class imread(metaclass=ABCMeta):
 
         self.__metadata__()
 
-        self.timeseries = self.shape[4] > 1
-        self.zstack = self.shape[3] > 1
         if not hasattr(self, 'cnamelist'):
             self.cnamelist = 'abcdefghijklmnopqrstuvwxyz'[:self.shape[2]]
 
@@ -676,6 +672,14 @@ class imread(metaclass=ABCMeta):
             self.immersionN = 1.33
         else:
             self.immersionN = 1
+
+    @cached_property
+    def timeseries(self):
+        return self.shape[4] > 1
+
+    @cached_property
+    def zstack(self):
+        return self.shape[3] > 1
 
     def set_transform(self):
         # handle transforms
@@ -1183,6 +1187,7 @@ class cziread(imread):
         pxsize = image.search('ScalingX')[0]
         if pxsize is not None:
             self.pxsize = pxsize * 1e6
+        print(f'zstack: {self.zstack}')
         if self.zstack:
             deltaz = image.search('ScalingZ')[0]
             if deltaz is not None:
@@ -1315,9 +1320,6 @@ class seqread(imread):
         Y = self.metadata.search('Height')[0]
         self.shape = (int(X), int(Y), maxc + 1, maxz + 1, maxt + 1)
 
-        self.timeseries = self.shape[4] > 1
-        self.zstack = self.shape[3] > 1
-
         self.pxsize = self.metadata.search('PixelSize_um')[0]
         if self.pxsize == 0:
             self.pxsize = 0.065
@@ -1372,9 +1374,6 @@ class bfread(imread):
         Z = self.reader.rdr.getSizeZ()
         T = self.reader.rdr.getSizeT()
         self.shape = (X, Y, C, Z, T)
-
-        self.timeseries = self.shape[4] > 1
-        self.zstack = self.shape[3] > 1
 
         image = list(self.metadata.search_all('Image').values())
         if len(image) and self.series in image[0]:
@@ -1509,8 +1508,6 @@ class tiffread(imread):
             T = self.metadata.get('frames', 1)
         Z = self.metadata.get('slices', 1)
         self.shape = (X, Y, C, Z, T)
-        self.timeseries = self.shape[4] > 1
-        self.zstack = self.shape[3] > 1
         # TODO: more metadata
         # self.__init__continued__()
 

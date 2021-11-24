@@ -1,11 +1,13 @@
 #!/usr/bin/python
 
-import sys, os
+import sys
+import os
 import numpy as np
-from wimread import imread
-from findcells import findcells
-from tiffwrite import IJTiffWriter, tiffwrite
 from itertools import product
+from tllab_common.wimread import imread
+from tllab_common.findcells import findcells
+from tllab_common.tiffwrite import IJTiffWriter, tiffwrite
+
 
 fname = os.path.realpath(__file__)
 test_files = os.path.join(os.path.dirname(fname), 'test_files')
@@ -42,7 +44,6 @@ def test_IJTiffWriter(tmp_path):
                 assert np.all(im(*n) == 0), 'zero frames not filled'
             else:
                 assert np.all(im(*n) == data[..., n[1], n[2]]), 'data not stored correctly'
-    # shutil.rmtree(tmp_path, True)
 
 
 def test_tiffwrite(tmp_path):
@@ -63,8 +64,8 @@ def test_findcell_a(tmp_path):
     tmp_path = str(tmp_path)
     with imread(os.path.join(test_files, 'findcell.a.tif')) as a:
         c, n = findcells(a(0), a(1), ccdist=150, thres=1, removeborders=True)
-        assert np.all(c==a(2)), 'Cellmask wrong'
-        assert np.all(n==a(3)), 'Nucleusmask wrong'
+        assert np.all(c == a(2)), 'Cellmask wrong'
+        assert np.all(n == a(3)), 'Nucleusmask wrong'
     files = [os.path.join(tmp_path, f) for f in ('cell.tif', 'nucleus.tif')]
     with IJTiffWriter(files, (1, 1, 1)) as tif:
         for i, f in enumerate((c, n)):
@@ -74,11 +75,11 @@ def test_findcell_a(tmp_path):
         with imread(file) as im:
             assert np.all(im(0) == f), 'data not stored correctly'
 
-## ----- This part runs the tests -----
 
+# ----- This part runs the tests -----
 if __name__ == '__main__':
     if len(sys.argv) < 2:
-        py = ['2.7', '3.8']
+        py = ['3.8']
     else:
         py = sys.argv[1:]
 
