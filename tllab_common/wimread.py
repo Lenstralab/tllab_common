@@ -73,10 +73,12 @@ class ImTransformsExtra(Transforms):
 class ImTransforms(ImTransformsExtra):
     """ Transforms class with methods to calculate channel transforms from bead files etc.
     """
-    def __init__(self, path, tracks=None, detectors=None, beadfile=None):
+    def __init__(self, path, tracks=None, detectors=None, beadfile=None, goodch=None, untransformed=None):
         super().__init__()
         self.tracks = tracks
         self.detectors = detectors
+        self.shape = (512, 512)
+        self.origin = (255.5, 255.5)
         if path.endswith('Pos0'):
             self.path = os.path.dirname(os.path.dirname(path))
         else:
@@ -89,11 +91,11 @@ class ImTransforms(ImTransformsExtra):
 
         self.ymlpath = os.path.join(self.path, 'transform.yml')
         self.tifpath = os.path.join(self.path, 'transform.tif')
-        if os.path.isfile(self.ymlpath):
+        try:
             self.load(self.ymlpath)
-        else:
+        except Exception:
             print('No transform file found, trying to generate one.')
-            self.calculate_transforms(self.files)
+            self.calculate_transforms(self.files, goodch, untransformed)
             self.save(self.ymlpath)
             self.save_transform_tiff()
             print(f'Saving transform in {self.ymlpath}.')
@@ -126,17 +128,19 @@ class ImTransforms(ImTransformsExtra):
         return Files
 
     @staticmethod
-    def calculate_transform(file):
+    def calculate_transform(file, goodch=None, untransformed=None):
         """ When no channel is not transformed by a cylindrical lens, assume that the image is scaled by a factor 1.162
             in the horizontal direction
         """
         with imread(file) as im:
             ims = [im.max(c) for c in range(im.shape[2])]
-            s = np.array([ImTransforms.get_e0(im, c) for c in range(im.shape[2])])
-            goodch = np.isfinite(s)
-            untransformed = s < 1.2
+            if goodch is None or untransformed is None:
+                s = np.array([ImTransforms.get_e0(im, c) for c in range(im.shape[2])])
+                goodch = goodch or np.isfinite(s)
+                untransformed = untransformed or  s < 1.2
+                print(f's: {s}, ', end='')
             masterch = np.nanargmax(untransformed)
-            print(f's: {s}, untransformed: {untransformed}, masterch: {masterch}')
+            print(f'untransformed: {untransformed}, masterch: {masterch}')
             C = Transform()
             if not np.any(untransformed):  # We could maybe get the scaling from s
                 M = C.matrix
@@ -150,8 +154,8 @@ class ImTransforms(ImTransformsExtra):
                     Tr[im.track[c], im.detector[c]] = Transform(ims[masterch], ims[c]) * C
         return Tr
 
-    def calculate_transforms(self, files):
-        Tq = [self.calculate_transform(file) for file in files]
+    def calculate_transforms(self, files, goodch=None, untransformed=None):
+        Tq = [self.calculate_transform(file, goodch, untransformed) for file in files]
         for key in set([key for t in Tq for key in t.keys()]):
             T = [t[key] for t in Tq if key in t]
             if len(T) == 1:
@@ -177,7 +181,7 @@ class ImTransforms(ImTransformsExtra):
     def get_scale(im):
         f = np.fft.fft2(im)
         a = np.fft.fftshift(np.fft.ifft2(f * f.conj()).real)  # acf
-        if np.sum(a > (a.mean() + a.max()) / 2) < 5:  # just noise
+        if np.sum(a > (4 * a.mean() + a.max()) / 5) < 5:  # just noise
             return np.nan
         else:
             p = fitgauss(a, [s / 2 for s in im.shape], True)[0]
@@ -196,6 +200,10 @@ class ImTransforms(ImTransformsExtra):
         e = e[s > (np.max(s) / 4 + 3 / 4 * np.min(s))]
 
         plt.plot(z, e)
+
+        z = z[np.isfinite(e)]
+        e = e[np.isfinite(e)]
+
         return 100 * np.trapz(np.log(e) ** 2, z) / len(e)
 
 
@@ -638,8 +646,11 @@ class imread(metaclass=ABCMeta):
             try:
                 self.cyllens = m['CylLens']
                 self.duolink = m['DLFilterSet'].split(' & ')[m['DLFilterChannel']]
-                self.feedback = m['FeedbackChannels']
-            except:
+                if 'FeedbackChannels' in m:
+                    self.feedback = m['FeedbackChannels']
+                else:
+                    self.feedback = m['FeedbackChannel']
+            except Exception:
                 self.cyllens = None
                 self.duolink = None
                 self.feedback = None
@@ -689,7 +700,8 @@ class imread(metaclass=ABCMeta):
             if isinstance(self.transform, Transforms):
                 self.transform = self.transform
             else:
-                self.transform = ImTransforms(self.path, self.track, self.detector, self.beadfile)
+                self.transform = ImTransforms(self.path, self.track, self.detector, self.beadfile,
+                                              np.arange(self.shape[2]), np.array(self.detector) == 0)
                 if self.drift is True:
                     self.transform = ImShiftTransforms(self)
                 elif not (self.drift is False or self.drift is None):
@@ -1187,7 +1199,6 @@ class cziread(imread):
         pxsize = image.search('ScalingX')[0]
         if pxsize is not None:
             self.pxsize = pxsize * 1e6
-        print(f'zstack: {self.zstack}')
         if self.zstack:
             deltaz = image.search('ScalingZ')[0]
             if deltaz is not None:

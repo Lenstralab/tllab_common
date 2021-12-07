@@ -2,14 +2,13 @@ import SimpleITK as sitk  # best if SimpleElastix is installed: https://simpleel
 import yaml
 import os
 import numpy as np
-# from dill import register
 from copy import deepcopy
 from collections import OrderedDict
 
 try:
     pp = True
     from pandas import DataFrame, Series
-except:
+except Exception:
     pp = False
 
 
@@ -76,11 +75,11 @@ class Transform:
     def __init__(self, *args):
         self.transform = sitk.ReadTransform(os.path.join(os.path.dirname(__file__), 'transform.txt'))
         self.dparameters = (0, 0, 0, 0, 0, 0)
+        self.shape = (512, 512)
+        self.origin = (255.5, 255.5)
         if len(args) == 1:  # load from file or dict
             if isinstance(args[0], np.ndarray):
                 self.matrix = args[0]
-                self.shape = (512, 512)
-                self.origin = (255.5, 255.5)
             else:
                 self.load(*args)
         elif len(args) > 1:  # make new transform using fixed and moving image
@@ -182,7 +181,7 @@ class Transform:
         else:
             dtype = im.dtype
             im = im.astype('float')
-            intp = sitk.sitkBSplineResamplerOrder3 if np.issubdtype(dtype, np.floating) else sitk.sitkNearestNeighbor
+            intp = sitk.sitkBSpline if np.issubdtype(dtype, np.floating) else sitk.sitkNearestNeighbor
             return self.castArray(sitk.Resample(self.castImage(im), self.transform, intp, default)).astype(dtype)
 
     def coords(self, array, columns=None):
@@ -272,13 +271,3 @@ class Transform:
             reg.SmoothingSigmasAreSpecifiedInPhysicalUnitsOn()
             self.transform = reg.Execute(fix, mov)
         self.dparameters = 6 * [np.nan]
-
-
-# @register(Transform)
-# def dill_transform(pickler, obj):
-#     pickler.save_reduce(lambda d: Transform(d), (obj.asdict(),), obj=obj)
-#
-#
-# @register(Transforms)
-# def dill_transform(pickler, obj):
-#     pickler.save_reduce(lambda d: Transforms(d), (obj.asdict(),), obj=obj)
