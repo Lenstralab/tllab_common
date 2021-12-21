@@ -25,7 +25,7 @@ from parfor import parfor
 from tllab_common.tiffwrite import IJTiffWriter
 from tllab_common.transforms import Transform, Transforms
 from tllab_common.tools import fitgauss
-
+from numbers import Number
 
 class jvm:
     """ There can be only one java virtual machine per python process, so this is a singleton class to manage the jvm.
@@ -826,13 +826,16 @@ class imread(metaclass=ABCMeta):
             im[c,z,t]: return im(c,z,t)
             RESULT IS ALWAYS 5D!
         """
+        if isinstance(n, slice):
+            n = (n,)
         if isinstance(n, type(Ellipsis)):
-            return self.block()
-        if not isinstance(n, tuple):
+            n = ()
+        if isinstance(n, Number):
             c = n % self.shape[2]
             z = (n // self.shape[2]) % self.shape[3]
             t = (n // (self.shape[2] * self.shape[3])) % self.shape[4]
-            return self.block(None, None, c, z, t)
+            n = (c, z, t)
+            # return self.block(None, None, c, z, t)
         n = list(n)
 
         ell = [i for i, e in enumerate(n) if isinstance(e, type(Ellipsis))]
@@ -845,10 +848,11 @@ class imread(metaclass=ABCMeta):
                 n[ell[0]] = slice(0, -1, 1)
                 for i in range(5-len(n)):
                     n.insert(ell[0], slice(0, -1, 1))
-        if len(n) in (2, 4):
-            n.append(slice(0, -1, 1))
-        for _ in range(5-len(n)):
+        while len(n) not in (3, 5):
+            n.append(0)
+        while len(n) < 5:
             n.insert(0, slice(0, -1, 1))
+
         for i, e in enumerate(n):
             if isinstance(e, slice):
                 a = [e.start, e.stop, e.step]
@@ -1167,9 +1171,6 @@ class cziread(imread):
     @staticmethod
     def _can_open(path):
         return isinstance(path, str) and path.endswith('.czi')
-
-    # def __init__(self, path, series=0, transform=False, drift=False, beadfile=None, dtype=None, meta=None):
-    #     super().__init__(path, series, transform, drift, beadfile, dtype, meta)
 
     def __metadata__(self):
         # TODO: make sure frame function still works when a subblock has data from more than one frame

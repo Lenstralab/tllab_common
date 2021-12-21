@@ -5,7 +5,7 @@ with open('README.md', 'r') as fh:
 
 setuptools.setup(
     name='tllab_common',
-    version='2021.11.3',
+    version='2021.12.0',
     author='Lenstra lab NKI',
     author_email='t.lenstra@nki.nl',
     description='Common code for the Lenstra lab.',
@@ -23,4 +23,6 @@ setuptools.setup(
                       'tifffile', 'czifile', 'pyyaml', 'dill', 'colorcet', 'multipledispatch', 'pytest-xdist', 'numba',
                       'scipy'],
     scripts=['bin/wimread'],
+    package_data={'': ['transform.txt']},
+    include_package_data=True,
 )
