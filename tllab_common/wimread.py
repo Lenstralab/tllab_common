@@ -870,9 +870,7 @@ class imread(metaclass=ABCMeta):
                         a[j] %= self.shape[i]
                         a[j] += 1
                 n[i] = np.arange(*a, dtype=int)
-            else:
-                n[i] = int(n[i])
-        n = [np.array(i) for i in n]
+        n = [np.array(i, int) for i in n]
         if len(n) == 3:
             return self.block(None, None, *n)
         if len(n) == 5:
