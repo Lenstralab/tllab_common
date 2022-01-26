@@ -22,10 +22,11 @@ from collections import OrderedDict
 from abc import ABCMeta, abstractmethod
 from functools import cached_property
 from parfor import parfor
-from tllab_common.tiffwrite import IJTiffWriter
+from tiffwrite import IJTiffWriter
 from tllab_common.transforms import Transform, Transforms
 from tllab_common.tools import fitgauss
 from numbers import Number
+
 
 class jvm:
     """ There can be only one java virtual machine per python process, so this is a singleton class to manage the jvm.
@@ -50,10 +51,12 @@ class jvm:
             log4j = javabridge.JClassWrapper("loci.common.Log4jTools")
             log4j.enableLogging()
             log4j.setRootLevel("ERROR")
+
         if self.vm_killed:
             raise Exception('The JVM was killed before, and cannot be restarted in this Python process.')
 
     def kill_vm(self):
+        print('Killing java vm')
         javabridge.kill_vm()
         self.vm_started = False
         self.vm_killed = True
@@ -812,12 +815,12 @@ class imread(metaclass=ABCMeta):
         """
         if len(n) == 1:
             n = self.get_channel(n[0])
-            c = n % self.shape[2]
-            z = (n // self.shape[2]) % self.shape[3]
-            t = (n // (self.shape[2] * self.shape[3])) % self.shape[4]
+            c = int(n % self.shape[2])
+            z = int((n // self.shape[2]) % self.shape[3])
+            t = int((n // (self.shape[2] * self.shape[3])) % self.shape[4])
             return self.frame(c, z, t)
         else:
-            return self.frame(*n)
+            return self.frame(*[int(i) for i in n])
 
     def __getitem__(self, n):
         """ returns sliced 5D block
@@ -866,7 +869,9 @@ class imread(metaclass=ABCMeta):
                     if a[j] < 0:
                         a[j] %= self.shape[i]
                         a[j] += 1
-                n[i] = np.arange(*a)
+                n[i] = np.arange(*a, dtype=int)
+            else:
+                n[i] = int(n[i])
         n = [np.array(i) for i in n]
         if len(n) == 3:
             return self.block(None, None, *n)
@@ -1365,9 +1370,6 @@ class bfread(imread):
     def _can_open(path):
         return True
 
-    # def __init__(self, path, series=0, transform=False, drift=False, beadfile=None, dtype=None, meta=None):
-    #     super().__init__(path, series, transform, drift, beadfile, dtype, meta)
-
     def __metadata__(self):
         jvm().start_vm()  # We need java for this :(
         self.key = np.random.randint(1e9)
@@ -1446,9 +1448,6 @@ class ndread(imread):
     def _can_open(path):
         return isinstance(path, np.ndarray) and path.ndim in (2, 3, 5)
 
-    # def __init__(self, path, series=0, transform=False, drift=False, beadfile=None, dtype=None, meta=None):
-    #     super().__init__(path, series, transform, drift, beadfile, dtype, meta)
-
     def __metadata__(self):
         assert isinstance(self.path, np.ndarray), 'Not a numpy array'
         if np.ndim(self.path) == 5:
@@ -1500,9 +1499,6 @@ class tiffread(imread):
                 return tif.is_imagej
         else:
             return False
-
-    # def __init__(self, path, series=0, transform=False, drift=False, beadfile=None, dtype=None, meta=None):
-    #     super().__init__(path, series, transform, drift, beadfile, dtype, meta)
 
     def __metadata__(self):
         self.tif = tifffile.TiffFile(self.path)
