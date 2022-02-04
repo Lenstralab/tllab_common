@@ -82,15 +82,11 @@ class ImTransforms(ImTransformsExtra):
         self.detectors = detectors
         self.shape = (512, 512)
         self.origin = (255.5, 255.5)
+        self.beadfile = beadfile
         if path.endswith('Pos0'):
             self.path = os.path.dirname(os.path.dirname(path))
         else:
             self.path = os.path.dirname(path)
-        if beadfile is None:
-            beadfile = self.get_bead_files()
-        self.files = beadfile
-        if isinstance(self.files, str):
-            self.files = (self.files,)
 
         self.ymlpath = os.path.join(self.path, 'transform.yml')
         self.tifpath = os.path.join(self.path, 'transform.tif')
@@ -98,11 +94,24 @@ class ImTransforms(ImTransformsExtra):
             self.load(self.ymlpath)
         except Exception:
             print('No transform file found, trying to generate one.')
+            if not self.files:
+                raise FileNotFoundError('No bead files found to calculate the transform from.')
             self.calculate_transforms(self.files, goodch, untransformed)
             self.save(self.ymlpath)
             self.save_transform_tiff()
             print(f'Saving transform in {self.ymlpath}.')
             print(f'Please check the transform in {self.tifpath}.')
+
+    @cached_property
+    def files(self):
+        try:
+            if self.beadfile is None:
+                files = self.get_bead_files()
+            if isinstance(files, str):
+                files = (files,)
+            return files
+        except Exception:
+            return ()
 
     def __reduce__(self):
         return self.__class__, (self.path, self.tracks, self.detectors, self.files)
