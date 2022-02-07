@@ -21,7 +21,7 @@ setuptools.setup(
     python_requires='>=3.7',
     install_requires=['untangle', 'python-javabridge', 'python-bioformats', 'pandas', 'psutil', 'numpy', 'tqdm',
                       'tifffile', 'czifile', 'pyyaml', 'dill', 'colorcet', 'multipledispatch', 'pytest-xdist', 'numba',
-                      'scipy', 'tiffwrite'],
+                      'scipy', 'tiffwrite', 'SimpleITK-SimpleElastix'],
     scripts=['bin/wimread'],
     package_data={'': ['transform.txt']},
     include_package_data=True,
