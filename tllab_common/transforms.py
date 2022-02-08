@@ -1,4 +1,7 @@
-import SimpleITK as sitk  # best if SimpleElastix is installed: https://simpleelastix.readthedocs.io/GettingStarted.html
+try:
+    import SimpleITK as sitk  # best if SimpleElastix is installed: https://simpleelastix.readthedocs.io/GettingStarted.html
+except Exception:
+    pass
 import yaml
 import os
 import numpy as np
