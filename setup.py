@@ -23,7 +23,7 @@ setuptools.setup(
     install_requires=['untangle', 'python-javabridge', 'python-bioformats', 'pandas', 'psutil', 'numpy', 'tqdm',
                       'tifffile', 'czifile', 'pyyaml', 'dill', 'colorcet', 'multipledispatch', 'numba',
                       'scipy', 'tiffwrite'],
-    extras_require={'transforms': ['SimpleITK-SimpleElastix'],
+    extras_require={'transforms': ['SimpleITK-SimpleElastix']},
     scripts=['bin/wimread'],
     package_data={'': ['transform.txt']},
     include_package_data=True,
