@@ -7,8 +7,11 @@ import json
 
 import scipy.signal
 import untangle
-import javabridge
-import bioformats
+try:
+    import javabridge
+    import bioformats
+except Exception:
+    pass
 import pandas
 import tifffile
 import czifile
