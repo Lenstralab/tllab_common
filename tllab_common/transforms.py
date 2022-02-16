@@ -1,4 +1,3 @@
-import SimpleITK as sitk  # best if SimpleElastix is installed: https://simpleelastix.readthedocs.io/GettingStarted.html
 import yaml
 import os
 import numpy as np
@@ -6,9 +5,16 @@ from copy import deepcopy
 from collections import OrderedDict
 
 try:
+    # best if SimpleElastix is installed: https://simpleelastix.readthedocs.io/GettingStarted.html
+    import SimpleITK as sitk
+    installed = True
+except ImportError:
+    installed = False
+
+try:
     pp = True
     from pandas import DataFrame, Series
-except Exception:
+except ImportError:
     pp = False
 
 
@@ -73,6 +79,8 @@ class Transforms(OrderedDict):
 
 class Transform:
     def __init__(self, *args):
+        if not installed:
+            raise ImportError('SimpleElastix is not installed: https://simpleelastix.readthedocs.io/GettingStarted.html')
         self.transform = sitk.ReadTransform(os.path.join(os.path.dirname(__file__), 'transform.txt'))
         self.dparameters = (0, 0, 0, 0, 0, 0)
         self.shape = (512, 512)
@@ -117,13 +125,11 @@ class Transform:
             im = sitk.GetArrayFromImage(im)
         return im
 
-    @staticmethod
-    def _get_matrix(value):
-        return np.array(((*value[:2], value[4]), (*value[2:4], value[5]), (0, 0, 1)))
-
     @property
     def matrix(self):
-        return self._get_matrix(self.parameters)
+        return np.array(((*self.parameters[:2], self.parameters[4]),
+                         (*self.parameters[2:4], self.parameters[5]),
+                         (0, 0, 1)))
 
     @matrix.setter
     def matrix(self, value):
@@ -132,7 +138,9 @@ class Transform:
 
     @property
     def dmatrix(self):
-        return self._get_matrix(self.dparameters)
+        return np.array(((*self.dparameters[:2], self.dparameters[4]),
+                         (*self.dparameters[2:4], self.dparameters[5]),
+                         (0, 0, 0)))
 
     @dmatrix.setter
     def dmatrix(self, value):

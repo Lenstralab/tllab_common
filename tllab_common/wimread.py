@@ -6,9 +6,8 @@ import inspect
 import json
 
 import scipy.signal
+import scipy.optimize
 import untangle
-import javabridge
-import bioformats
 import pandas
 import tifffile
 import czifile
@@ -27,6 +26,13 @@ from tllab_common.transforms import Transform, Transforms
 from tllab_common.tools import fitgauss
 from numbers import Number
 
+try:
+    import javabridge
+    import bioformats
+    java = True
+except ImportError:
+    java = False
+
 
 class jvm:
     """ There can be only one java virtual machine per python process, so this is a singleton class to manage the jvm.
@@ -41,19 +47,22 @@ class jvm:
         return cls._instance
 
     def start_vm(self):
-        if not self.vm_started and not self.vm_killed:
-            javabridge.start_vm(class_path=bioformats.JARS, run_headless=True)
-            outputstream = javabridge.make_instance('java/io/ByteArrayOutputStream', "()V")
-            printstream = javabridge.make_instance('java/io/PrintStream', "(Ljava/io/OutputStream;)V", outputstream)
-            javabridge.static_call('Ljava/lang/System;', "setOut", "(Ljava/io/PrintStream;)V", printstream)
-            javabridge.static_call('Ljava/lang/System;', "setErr", "(Ljava/io/PrintStream;)V", printstream)
-            self.vm_started = True
-            log4j = javabridge.JClassWrapper("loci.common.Log4jTools")
-            log4j.enableLogging()
-            log4j.setRootLevel("ERROR")
+        if java:
+            if not self.vm_started and not self.vm_killed:
+                javabridge.start_vm(class_path=bioformats.JARS, run_headless=True)
+                outputstream = javabridge.make_instance('java/io/ByteArrayOutputStream', "()V")
+                printstream = javabridge.make_instance('java/io/PrintStream', "(Ljava/io/OutputStream;)V", outputstream)
+                javabridge.static_call('Ljava/lang/System;', "setOut", "(Ljava/io/PrintStream;)V", printstream)
+                javabridge.static_call('Ljava/lang/System;', "setErr", "(Ljava/io/PrintStream;)V", printstream)
+                self.vm_started = True
+                log4j = javabridge.JClassWrapper("loci.common.Log4jTools")
+                log4j.enableLogging()
+                log4j.setRootLevel("ERROR")
 
-        if self.vm_killed:
-            raise Exception('The JVM was killed before, and cannot be restarted in this Python process.')
+            if self.vm_killed:
+                raise Exception('The JVM was killed before, and cannot be restarted in this Python process.')
+        else:
+            raise ImportError('python-bioformats and or python-javabridge are not installed')
 
     def kill_vm(self):
         print('Killing java vm')
@@ -76,8 +85,9 @@ class ImTransformsExtra(Transforms):
 class ImTransforms(ImTransformsExtra):
     """ Transforms class with methods to calculate channel transforms from bead files etc.
     """
-    def __init__(self, path, tracks=None, detectors=None, beadfile=None, goodch=None, untransformed=None):
+    def __init__(self, path, cyllens, tracks=None, detectors=None, beadfile=None):
         super().__init__()
+        self.cyllens = cyllens
         self.tracks = tracks
         self.detectors = detectors
         self.shape = (512, 512)
@@ -96,7 +106,7 @@ class ImTransforms(ImTransformsExtra):
             print('No transform file found, trying to generate one.')
             if not self.files:
                 raise FileNotFoundError('No bead files found to calculate the transform from.')
-            self.calculate_transforms(self.files, goodch, untransformed)
+            self.calculate_transforms()
             self.save(self.ymlpath)
             self.save_transform_tiff()
             print(f'Saving transform in {self.ymlpath}.')
@@ -107,6 +117,8 @@ class ImTransforms(ImTransformsExtra):
         try:
             if self.beadfile is None:
                 files = self.get_bead_files()
+            else:
+                files = self.beadfile
             if isinstance(files, str):
                 files = (files,)
             return files
@@ -139,35 +151,36 @@ class ImTransforms(ImTransformsExtra):
             raise Exception('No bead file found!')
         return Files
 
-    @staticmethod
-    def calculate_transform(file, goodch=None, untransformed=None):
+    def calculate_transform(self, file):
         """ When no channel is not transformed by a cylindrical lens, assume that the image is scaled by a factor 1.162
             in the horizontal direction
         """
         with imread(file) as im:
             ims = [im.max(c) for c in range(im.shape[2])]
-            if goodch is None or untransformed is None:
-                s = np.array([ImTransforms.get_e0(im, c) for c in range(im.shape[2])])
-                goodch = goodch or np.isfinite(s)
-                untransformed = untransformed or  s < 1.2
-                print(f's: {s}, ', end='')
-            masterch = np.nanargmax(untransformed)
-            print(f'untransformed: {untransformed}, masterch: {masterch}')
+            goodch = [c for c in range(im.shape[2]) if not im.isnoise(im.max(c))]
+            untransformed = [c for c in range(im.shape[2]) if self.cyllens[im.detector[c]].lower() == 'none']
+
+            good_and_untrans = sorted(set(goodch) & set(untransformed))
+            if good_and_untrans:
+                masterch = good_and_untrans[0]
+            else:
+                masterch = goodch[0]
+            print(f'{untransformed = }, {masterch = }, {goodch = }')
             C = Transform()
-            if not np.any(untransformed):  # We could maybe get the scaling from s
+            if not np.any(good_and_untrans):
                 M = C.matrix
-                M[0, 0] = 1.162
+                M[0, 0] = 0.86
                 C.matrix = M
             Tr = Transforms()
-            for c in tqdm(np.where(goodch)[0]):
+            for c in tqdm(goodch):
                 if c == masterch:
                     Tr[im.track[c], im.detector[c]] = C
                 else:
                     Tr[im.track[c], im.detector[c]] = Transform(ims[masterch], ims[c]) * C
         return Tr
 
-    def calculate_transforms(self, files, goodch=None, untransformed=None):
-        Tq = [self.calculate_transform(file, goodch, untransformed) for file in files]
+    def calculate_transforms(self):
+        Tq = [self.calculate_transform(file) for file in self.files]
         for key in set([key for t in Tq for key in t.keys()]):
             T = [t[key] for t in Tq if key in t]
             if len(T) == 1:
@@ -516,13 +529,6 @@ class xmldata(OrderedDict):
         return xmldata(value) if isinstance(value, dict) else value
 
 
-# class PostInitCaller(ABCMeta):
-#     def __call__(cls, *args, **kwargs):
-#         obj = type.__call__(cls, *args, **kwargs)
-#         obj.__post_init__()
-#         return obj
-
-
 class imread(metaclass=ABCMeta):
     """ class to read image files, while taking good care of important metadata,
             currently optimized for .czi files, but can open anything that bioformats can handle
@@ -573,9 +579,12 @@ class imread(metaclass=ABCMeta):
                                     define a few properties, like shape, etc.
                 __frame__(self, c, z, t): this should return a single frame at channel c, slice z and time t
                 optional close(self): close the file in a proper way
+                optional field priority: subclasses with lower priority will be tried first, default = 99
                 Any other method can be overridden as needed
         wp@tl2019-2021
     """
+    priority = 99
+
     @staticmethod
     @abstractmethod
     def _can_open(path):  # Override this method, and return true when the subclass can open the file
@@ -599,10 +608,9 @@ class imread(metaclass=ABCMeta):
             raise Exception('Restart python kernel please!')
         if isinstance(path, imread):
             path = path.path
-        for subclass in cls.__subclasses__():
-            if not subclass is bfread and subclass._can_open(path):
+        for subclass in sorted(cls.__subclasses__(), key=lambda subclass: subclass.priority):
+            if subclass._can_open(path):
                 return super().__new__(subclass)
-        return super().__new__(bfread)  # panic and open with BioFormats
 
     def __init__(self, path, series=0, transform=False, drift=False, beadfile=None, dtype=None, meta=None):
         if isinstance(path, str):
@@ -636,8 +644,8 @@ class imread(metaclass=ABCMeta):
         self.objective = 'unknown'
         self.filter = 'unknown'
         self.NA = 1
-        self.cyllens = ['None', 'A']
-        self.duolink = '488/_561_/640'
+        self.cyllens = ['None', 'None']
+        self.duolink = 'None'
         self.detector = [0, 1]
         self.metadata = {}
         self.cache = deque_dict(16)
@@ -663,9 +671,9 @@ class imread(metaclass=ABCMeta):
                 else:
                     self.feedback = m['FeedbackChannel']
             except Exception:
-                self.cyllens = None
-                self.duolink = None
-                self.feedback = None
+                self.cyllens = ['None', 'None']
+                self.duolink = 'None'
+                self.feedback = []
         try:
             self.cyllenschannels = np.where([self.cyllens[self.detector[c]].lower() != 'none'
                                              for c in range(self.shape[2])])[0].tolist()
@@ -712,8 +720,7 @@ class imread(metaclass=ABCMeta):
             if isinstance(self.transform, Transforms):
                 self.transform = self.transform
             else:
-                self.transform = ImTransforms(self.path, self.track, self.detector, self.beadfile,
-                                              np.arange(self.shape[2]), np.array(self.detector) == 0)
+                self.transform = ImTransforms(self.path, self.cyllens, self.track, self.detector, self.beadfile)
                 if self.drift is True:
                     self.transform = ImShiftTransforms(self)
                 elif not (self.drift is False or self.drift is None):
@@ -1002,6 +1009,18 @@ class imread(metaclass=ABCMeta):
         return self.nansum(c, z, t) / (np.prod([len(i) for i in self.get_czt(c, z, t)])
                                        - self._stats(np.sum, c, z, t, lambda im: np.isnan(im)))
 
+    def isnoise(self, c=None, z=None, t=None):
+        """ True is volume c, z, t only has noise
+        """
+        if isinstance(c, np.ndarray) and c.ndim >= 2:
+            a = c
+        else:
+            c, z, t = [slice(-1) if i is None else i for i in (c, z, t)]
+            a = self[c, z, t].squeeze()
+        F = np.fft.fftn(a)
+        S = np.fft.fftshift(np.fft.ifftn(F * F.conj()).real / np.sum(a ** 2))
+        return -np.log(1 - S[tuple([0] * S.ndim)]) > 5
+
     @property
     def dtype(self):
         return self._dtype
@@ -1180,6 +1199,8 @@ class imread(metaclass=ABCMeta):
 
 
 class cziread(imread):
+    priority = 0
+
     @staticmethod
     def _can_open(path):
         return isinstance(path, str) and path.endswith('.czi')
@@ -1255,7 +1276,6 @@ class cziread(imread):
         self.cnamelist = [c['DetectorSettings']['Detector']['Id'] for c in
                           self.metadata['ImageDocument']['Metadata']['Information'].search('Channel')]
         self.track, self.detector = zip(*[[int(i) for i in re.findall('\d', c)] for c in self.cnamelist])
-        # self.__init__continued__()
 
     def __frame__(self, c=0, z=0, t=0):
         f = np.zeros(self.shape[:2], self.dtype)
@@ -1283,6 +1303,8 @@ class cziread(imread):
 
 
 class seqread(imread):
+    priority = 10
+
     @staticmethod
     def _can_open(path):
         return isinstance(path, str) and os.path.splitext(path)[1] == ''
@@ -1373,6 +1395,8 @@ class bfread(imread):
     """ This class is used as a last resort, when we don't have another way to open the file. We don't like it because
         it requires the java vm.
     """
+    priority = 99  # panic and open with BioFormats
+
     @staticmethod
     def _can_open(path):
         return True
@@ -1437,7 +1461,6 @@ class bfread(imread):
             self.NA = self.metadata.search('NumericalAperture', 1.47)[0]
             self.title = self.metadata.search('Name', self.title)
             self.binning = self.metadata.search('BinningX', 1)[0]
-        # self.__init__continued__()
 
     def __frame__(self, *args):
         frame = self.reader.read(*args, rescale=False).astype('float')
@@ -1451,6 +1474,8 @@ class bfread(imread):
 
 
 class ndread(imread):
+    priority = 20
+
     @staticmethod
     def _can_open(path):
         return isinstance(path, np.ndarray) and path.ndim in (2, 3, 5)
@@ -1465,7 +1490,6 @@ class ndread(imread):
             self.shape = self.path.shape + (1, 1, 1)
         self.title = 'numpy array'
         self.acquisitiondate = 'now'
-        # self.__init__continued__()
 
     def __frame__(self, c, z, t):
         if self.path.ndim == 5:
@@ -1499,6 +1523,8 @@ class ndread(imread):
 
 
 class tiffread(imread):
+    priority = 0
+
     @staticmethod
     def _can_open(path):
         if isinstance(path, str) and (path.endswith('.tif') or path.endswith('.tiff')):
@@ -1524,7 +1550,6 @@ class tiffread(imread):
         Z = self.metadata.get('slices', 1)
         self.shape = (X, Y, C, Z, T)
         # TODO: more metadata
-        # self.__init__continued__()
 
     def __frame__(self, c, z, t):
         if self.pndim == 3:

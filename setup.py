@@ -3,9 +3,10 @@ import setuptools
 with open('README.md', 'r') as fh:
     long_description = fh.read()
 
+
 setuptools.setup(
     name='tllab_common',
-    version='2022.1.0',
+    version='2022.2.0',
     author='Lenstra lab NKI',
     author_email='t.lenstra@nki.nl',
     description='Common code for the Lenstra lab.',
@@ -19,9 +20,11 @@ setuptools.setup(
         'Operating System :: OS Independent',
     ],
     python_requires='>=3.7',
-    install_requires=['untangle', 'python-javabridge', 'python-bioformats', 'pandas', 'psutil', 'numpy', 'tqdm',
-                      'tifffile', 'czifile', 'pyyaml', 'dill', 'colorcet', 'multipledispatch', 'pytest-xdist', 'numba',
-                      'scipy'],
+    install_requires=['untangle', 'pandas', 'psutil', 'numpy', 'tqdm', 'tifffile', 'czifile', 'pyyaml', 'dill',
+                      'colorcet', 'multipledispatch', 'numba', 'scipy'],
+    extras_require={'transforms': 'SimpleElastix@git+https://github.com/wimpomp/SimpleElastix.git',
+                    'bioformats': ['python-javabridge', 'python-bioformats']},
+    tests_require=['pytest-xdist'],
     scripts=['bin/wimread'],
     package_data={'': ['transform.txt']},
     include_package_data=True,
