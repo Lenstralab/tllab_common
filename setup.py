@@ -21,7 +21,7 @@ setuptools.setup(
     ],
     python_requires='>=3.7',
     install_requires=['untangle', 'pandas', 'psutil', 'numpy', 'tqdm', 'tifffile', 'czifile', 'pyyaml', 'dill',
-                      'colorcet', 'multipledispatch', 'numba', 'scipy'],
+                      'colorcet', 'multipledispatch', 'numba', 'scipy', 'tiffwrite'],
     extras_require={'transforms': 'SimpleElastix@git+https://github.com/wimpomp/SimpleElastix.git',
                     'bioformats': ['python-javabridge', 'python-bioformats']},
     tests_require=['pytest-xdist'],
