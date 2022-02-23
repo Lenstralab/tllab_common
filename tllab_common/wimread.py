@@ -85,21 +85,31 @@ class ImTransformsExtra(Transforms):
 class ImTransforms(ImTransformsExtra):
     """ Transforms class with methods to calculate channel transforms from bead files etc.
     """
-    def __init__(self, path, cyllens, tracks=None, detectors=None, beadfile=None):
+
+    def __init__(self, path, cyllens, tracks=None, detectors=None, file=None):
         super().__init__()
         self.cyllens = cyllens
         self.tracks = tracks
         self.detectors = detectors
         self.shape = (512, 512)
         self.origin = (255.5, 255.5)
-        self.beadfile = beadfile
-        if path.endswith('Pos0'):
+
+        # TODO: check this
+        if re.search(r'^Pos\d+', os.path.basename(path.rstrip(os.path.sep))):
             self.path = os.path.dirname(os.path.dirname(path))
         else:
             self.path = os.path.dirname(path)
-
-        self.ymlpath = os.path.join(self.path, 'transform.yml')
-        self.tifpath = os.path.join(self.path, 'transform.tif')
+        if file is not None:
+            if isinstance(file, str) and file.lower().endswith('.yml'):
+                self.ymlpath = file
+                self.beadfile = None
+            else:
+                self.ymlpath = os.path.join(self.path, 'transform.yml')
+                self.beadfile = file
+        else:
+            self.ymlpath = os.path.join(self.path, 'transform.yml')
+            self.beadfile = None
+        self.tifpath = self.ymlpath[-3:] + 'tif'
         try:
             self.load(self.ymlpath)
         except Exception:
@@ -134,7 +144,8 @@ class ImTransforms(ImTransformsExtra):
         return super().__call__(channel, time, tracks, detectors)
 
     def get_bead_files(self):
-        files = sorted([os.path.join(self.path, f) for f in os.listdir(self.path) if f.lower().startswith('beads')])
+        files = sorted([os.path.join(self.path, f) for f in os.listdir(self.path) if f.lower().startswith('beads')
+                        and not f.lower().endswith('.pdf')])
         if not files:
             raise Exception('No bead file found!')
         Files = []
@@ -647,6 +658,7 @@ class imread(metaclass=ABCMeta):
         self.cyllens = ['None', 'None']
         self.duolink = 'None'
         self.detector = [0, 1]
+        self.track = [0]
         self.metadata = {}
         self.cache = deque_dict(16)
         self._frame_decorator = None
@@ -723,7 +735,10 @@ class imread(metaclass=ABCMeta):
             if isinstance(self.transform, Transforms):
                 self.transform = self.transform
             else:
-                self.transform = ImTransforms(self.path, self.cyllens, self.track, self.detector, self.beadfile)
+                if isinstance(self.transform, str):
+                    self.transform = ImTransforms(self.path, self.cyllens, self.track, self.detector, self.transform)
+                else:
+                    self.transform = ImTransforms(self.path, self.cyllens, self.track, self.detector, self.beadfile)
                 if self.drift is True:
                     self.transform = ImShiftTransforms(self)
                 elif not (self.drift is False or self.drift is None):

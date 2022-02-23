@@ -180,8 +180,8 @@ class Transform:
         self.shape = shape[:2]
 
     def asdict(self):
-        return {'CenterOfRotationPoint': self.origin, 'Size': self.shape,
-                'TransformParameters': self.parameters, 'dTransformParameters': self.dparameters}
+        return {'CenterOfRotationPoint': self.origin, 'Size': self.shape, 'TransformParameters': self.parameters,
+                'dTransformParameters': np.nan_to_num(self.dparameters, nan=1e99).tolist()}
 
     def frame(self, im, default=0):
         if self.is_unity():
