@@ -240,42 +240,22 @@ class Transform:
         kind = kind or 'affine'
         self.shape = fix.shape
         fix, mov = self.castImage(fix), self.castImage(mov)
-        if hasattr(sitk, 'ElastixImageFilter'):
-            # TODO: implement RigidTransform
-            tfilter = sitk.ElastixImageFilter()
-            tfilter.LogToConsoleOff()
-            tfilter.SetFixedImage(fix)
-            tfilter.SetMovingImage(mov)
-            tfilter.SetParameterMap(sitk.GetDefaultParameterMap(kind))
-            tfilter.Execute()
-            transform = tfilter.GetTransformParameterMap()[0]
-            if kind == 'affine':
-                self.parameters = [float(t) for t in transform['TransformParameters']]
-                self.shape = [float(t) for t in transform['Size']]
-                self.origin = [float(t) for t in transform['CenterOfRotationPoint']]
-            elif kind == 'translation':
-                self.parameters = [1.0, 0.0, 0.0, 1.0] + [float(t) for t in transform['TransformParameters']]
-                self.shape = [float(t) for t in transform['Size']]
-                self.origin = [(t - 1) / 2 for t in self.shape]
-            else:
-                raise NotImplementedError(f'{kind} tranforms not implemented (yet)')
+        # TODO: implement RigidTransform
+        tfilter = sitk.ElastixImageFilter()
+        tfilter.LogToConsoleOff()
+        tfilter.SetFixedImage(fix)
+        tfilter.SetMovingImage(mov)
+        tfilter.SetParameterMap(sitk.GetDefaultParameterMap(kind))
+        tfilter.Execute()
+        transform = tfilter.GetTransformParameterMap()[0]
+        if kind == 'affine':
+            self.parameters = [float(t) for t in transform['TransformParameters']]
+            self.shape = [float(t) for t in transform['Size']]
+            self.origin = [float(t) for t in transform['CenterOfRotationPoint']]
+        elif kind == 'translation':
+            self.parameters = [1.0, 0.0, 0.0, 1.0] + [float(t) for t in transform['TransformParameters']]
+            self.shape = [float(t) for t in transform['Size']]
+            self.origin = [(t - 1) / 2 for t in self.shape]
         else:
-            # TODO: make this as good as possible, because installing SimpleElastix is difficult
-            # TODO: implement TranslationTransform and RigidTransform
-            print('SimpleElastix is not installed, trying SimpleITK, which does not give very accurate results')
-            initial_transform = sitk.CenteredTransformInitializer(fix, mov, sitk.AffineTransform(2),
-                                                                  sitk.CenteredTransformInitializerFilter.GEOMETRY)
-            reg = sitk.ImageRegistrationMethod()
-            reg.SetMetricAsMattesMutualInformation(numberOfHistogramBins=512)
-            reg.SetMetricSamplingStrategy(reg.RANDOM)
-            reg.SetMetricSamplingPercentage(1)
-            reg.SetInterpolator(sitk.sitkLinear)
-            reg.SetOptimizerAsGradientDescent(learningRate=1.0, numberOfIterations=1000,
-                                estimateLearningRate=reg.Once, convergenceMinimumValue=1e-12, convergenceWindowSize=10)
-            reg.SetOptimizerScalesFromPhysicalShift()
-            reg.SetInitialTransform(initial_transform, inPlace=False)
-            reg.SetShrinkFactorsPerLevel(shrinkFactors=[4, 2, 1])
-            reg.SetSmoothingSigmasPerLevel(smoothingSigmas=[2, 1, 0])
-            reg.SmoothingSigmasAreSpecifiedInPhysicalUnitsOn()
-            self.transform = reg.Execute(fix, mov)
+            raise NotImplementedError(f'{kind} tranforms not implemented (yet)')
         self.dparameters = 6 * [np.nan]

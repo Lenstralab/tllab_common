@@ -126,7 +126,7 @@ class ImTransforms(ImTransformsExtra):
             return ()
 
     def __reduce__(self):
-        return self.__class__, (self.path, self.tracks, self.detectors, self.files)
+        return self.__class__, (self.path, self.cyllens, self.tracks, self.detectors, self.files)
 
     def __call__(self, channel, time=None, tracks=None, detectors=None):
         tracks = tracks or self.tracks
@@ -612,7 +612,7 @@ class imread(metaclass=ABCMeta):
             if subclass._can_open(path):
                 return super().__new__(subclass)
 
-    def __init__(self, path, series=0, transform=False, drift=False, beadfile=None, dtype=None, meta=None):
+    def __init__(self, path, series=0, transform=False, drift=False, beadfile=None, sigma=None, dtype=None, meta=None):
         if isinstance(path, str):
             self.path = os.path.abspath(path)
             self.title = os.path.splitext(os.path.basename(self.path))[0]
@@ -684,17 +684,20 @@ class imread(metaclass=ABCMeta):
             s = int(re.findall('_(\d{3})_', self.duolink)[0])
         except Exception:
             s = 561
-        try:
-            sigma = []
-            for t, d in zip(self.track, self.detector):
-                l = np.array(self.laserwavelengths[t]) + 22
-                sigma.append([l[l > s].max(initial=0), l[l < s].max(initial=0)][d])
-            sigma = np.array(sigma)
-            sigma[sigma == 0] = 600
-            sigma /= 2 * self.NA * self.pxsize * 1000
-            self.sigma = sigma.tolist()
-        except Exception:
-            self.sigma = [2] * self.shape[2]
+        if sigma is None:
+            try:
+                sigma = []
+                for t, d in zip(self.track, self.detector):
+                    l = np.array(self.laserwavelengths[t]) + 22
+                    sigma.append([l[l > s].max(initial=0), l[l < s].max(initial=0)][d])
+                sigma = np.array(sigma)
+                sigma[sigma == 0] = 600
+                sigma /= 2 * self.NA * self.pxsize * 1000
+                self.sigma = sigma.tolist()
+            except Exception:
+                self.sigma = [2] * self.shape[2]
+        else:
+            self.sigma = sigma
         if 1.5 < self.NA:
             self.immersionN = 1.661
         elif 1.3 < self.NA < 1.5:
@@ -900,7 +903,8 @@ class imread(metaclass=ABCMeta):
             self.close()
 
     def __reduce__(self):
-        return self.__class__, (self.path, self.series, self.transform, self.drift, self.beadfile, self.dtype)
+        return self.__class__, (self.path, self.series, self.transform, self.drift, self.beadfile, self.sigma,
+                                self.dtype)
 
     def czt(self, n):
         """ returns indices c, z, t used when calling im(n)

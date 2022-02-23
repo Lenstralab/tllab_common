@@ -1,4 +1,9 @@
 import setuptools
+import platform
+
+if platform.system().lower() == 'linux':
+    import pkg_resources
+    pkg_resources.require(['pip >= 20.3'])
 
 with open('README.md', 'r') as fh:
     long_description = fh.read()
@@ -6,7 +11,7 @@ with open('README.md', 'r') as fh:
 
 setuptools.setup(
     name='tllab_common',
-    version='2022.2.0',
+    version='2022.2.1',
     author='Lenstra lab NKI',
     author_email='t.lenstra@nki.nl',
     description='Common code for the Lenstra lab.',
@@ -22,7 +27,7 @@ setuptools.setup(
     python_requires='>=3.7',
     install_requires=['untangle', 'pandas', 'psutil', 'numpy', 'tqdm', 'tifffile', 'czifile', 'pyyaml', 'dill',
                       'colorcet', 'multipledispatch', 'numba', 'scipy', 'tiffwrite'],
-    extras_require={'transforms': 'SimpleElastix@git+https://github.com/wimpomp/SimpleElastix.git',
+    extras_require={'transforms': 'SimpleITK-SimpleElastix',
                     'bioformats': ['python-javabridge', 'python-bioformats']},
     tests_require=['pytest-xdist'],
     scripts=['bin/wimread'],
