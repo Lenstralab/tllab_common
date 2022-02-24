@@ -85,7 +85,6 @@ class ImTransformsExtra(Transforms):
 class ImTransforms(ImTransformsExtra):
     """ Transforms class with methods to calculate channel transforms from bead files etc.
     """
-
     def __init__(self, path, cyllens, tracks=None, detectors=None, file=None):
         super().__init__()
         self.cyllens = cyllens
@@ -109,7 +108,7 @@ class ImTransforms(ImTransformsExtra):
         else:
             self.ymlpath = os.path.join(self.path, 'transform.yml')
             self.beadfile = None
-        self.tifpath = self.ymlpath[-3:] + 'tif'
+        self.tifpath = self.ymlpath[:-3] + 'tif'
         try:
             self.load(self.ymlpath)
         except Exception:
@@ -762,7 +761,7 @@ class imread(metaclass=ABCMeta):
         """
         loader = yaml.SafeLoader
         loader.add_implicit_resolver(
-            u'tag:yaml.org,2002:float',
+            r'tag:yaml.org,2002:float',
             re.compile(u'''^(?:
              [-+]?(?:[0-9][0-9_]*)\\.[0-9_]*(?:[eE][-+]?[0-9]+)?
             |[-+]?(?:[0-9][0-9_]*)(?:[eE][-+]?[0-9]+)
