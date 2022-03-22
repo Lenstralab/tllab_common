@@ -762,14 +762,14 @@ class imread(metaclass=ABCMeta):
         loader = yaml.SafeLoader
         loader.add_implicit_resolver(
             r'tag:yaml.org,2002:float',
-            re.compile(u'''^(?:
-             [-+]?(?:[0-9][0-9_]*)\\.[0-9_]*(?:[eE][-+]?[0-9]+)?
+            re.compile(r'''^(?:
+             [-+]?(?:[0-9][0-9_]*)\.[0-9_]*(?:[eE][-+]?[0-9]+)?
             |[-+]?(?:[0-9][0-9_]*)(?:[eE][-+]?[0-9]+)
-            |\\.[0-9_]+(?:[eE][-+][0-9]+)?
-            |[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\\.[0-9_]*
+            |\.[0-9_]+(?:[eE][-+][0-9]+)?
+            |[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*
             |[-+]?\\.(?:inf|Inf|INF)
-            |\\.(?:nan|NaN|NAN))$''', re.X),
-            list(u'-+0123456789.'))
+            |\.(?:nan|NaN|NAN))$''', re.X),
+            list(r'-+0123456789.'))
         with open(file, 'r') as f:
             return yaml.load(f, loader)
 
@@ -881,27 +881,28 @@ class imread(metaclass=ABCMeta):
             if len(n) > 5:
                 n.remove(Ellipsis)
             else:
-                n[ell[0]] = slice(0, -1, 1)
+                n[ell[0]] = slice(None)
                 for i in range(5-len(n)):
-                    n.insert(ell[0], slice(0, -1, 1))
+                    n.insert(ell[0], slice(None))
         while len(n) not in (3, 5):
             n.append(0)
         while len(n) < 5:
-            n.insert(0, slice(0, -1, 1))
+            n.insert(0, slice(None))
 
         for i, e in enumerate(n):
-            if isinstance(e, slice):
+            if e is None:
+                e = slice(None)
+            if isinstance(e, (slice, range)):
                 a = [e.start, e.stop, e.step]
                 if a[0] is None:
                     a[0] = 0
                 if a[1] is None:
-                    a[1] = -1
+                    a[1] = self.shape[i]
                 if a[2] is None:
                     a[2] = 1
                 for j in range(2):
                     if a[j] < 0:
                         a[j] %= self.shape[i]
-                        a[j] += 1
                 n[i] = np.arange(*a, dtype=int)
         n = [np.array(i, int) for i in n]
         if len(n) == 3:
@@ -962,17 +963,17 @@ class imread(metaclass=ABCMeta):
             return self.transform(c, t, self.track, self.detector).frame(frame)
 
     def get_czt(self, c, z, t):
-        if c is None:
-            c = range(self.shape[2])
-        if z is None:
-            z = range(self.shape[3])
-        if t is None:
-            t = range(self.shape[4])
-        c = tolist(c)
-        z = tolist(z)
-        t = tolist(t)
-        c = [self.get_channel(ic) for ic in c]
-        return c, z, t
+        czt = []
+        for i, n in enumerate((c, z, t), 2):
+            if n is None:
+                czt.append(list(range(self.shape[i])))
+            elif isinstance(n, range):
+                czt.append(list(range(*[k % self.shape[i] for k in (n.start, n.stop)], n.step)))
+            elif isinstance(n, Number):
+                czt.append([n % self.shape[i]])
+            else:
+                czt.append([k % self.shape[i] for k in n])
+        return [self.get_channel(c) for c in czt[0]], *czt[1:]
 
     def _stats(self, fun, c=None, z=None, t=None, ffun=None):
         """ fun = np.min, np.max, np.sum or their nan varieties """

@@ -11,7 +11,7 @@ with open('README.md', 'r') as fh:
 
 setuptools.setup(
     name='tllab_common',
-    version='2022.2.2',
+    version='2022.3.0',
     author='Lenstra lab NKI',
     author_email='t.lenstra@nki.nl',
     description='Common code for the Lenstra lab.',
