@@ -1243,7 +1243,7 @@ class cziread(imread):
         self.filedict = filedict
         self.metadata = xmldata(untangle.parse(self.reader.metadata()))
 
-        image = list(self.metadata.search_all('Image').values())
+        image = [i for i in self.metadata.search_all('Image').values() if i]
         if len(image) and self.series in image[0]:
             image = xmldata(image[0][self.series])
         else:
@@ -1275,15 +1275,15 @@ class cziread(imread):
                             for attenuator in attenuators.values()]
         self.collimator = self.metadata.re_search(('Collimator', 'Position'))
         detector = self.metadata.search(('Instrument', 'Detector'))
-        self.gain = [int(i['AmplificationGain']) for i in detector]
+        self.gain = [int(i.get('AmplificationGain', 1)) for i in detector]
         self.powermode = self.metadata.re_search(('TrackSetup', 'FWFOVPosition'))[0]
         optovar = self.metadata.re_search(('TrackSetup', 'TubeLensPosition'), '1x')
         self.optovar = []
         for o in optovar:
-            a = re.search('\d?\d*[,\.]?\d+(?=x$)', o)
+            a = re.search(r'\d?\d*[,\.]?\d+(?=x$)', o)
             if hasattr(a, 'group'):
                 self.optovar.append(float(a.group(0).replace(',', '.')))
-        self.pcf = [2 ** self.metadata.re_search(('Image', 'ComponentBitCount'), 14)[0] / i
+        self.pcf = [2 ** self.metadata.re_search(('Image', 'ComponentBitCount'), 14)[0] / float(i)
                     for i in self.metadata.re_search(('Channel', 'PhotonConversionFactor'), 1)]
         self.binning = self.metadata.re_search(('AcquisitionModeSetup', 'CameraBinning'), 1)[0]
         self.objective = self.metadata.re_search(('AcquisitionModeSetup', 'Objective'))[0]
@@ -1294,7 +1294,11 @@ class cziread(imread):
                             self.metadata.re_search(('AcquisitionModeSetup', 'CameraFrameOffsetY'))[0]]
         self.cnamelist = [c['DetectorSettings']['Detector']['Id'] for c in
                           self.metadata['ImageDocument']['Metadata']['Information'].search('Channel')]
-        self.track, self.detector = zip(*[[int(i) for i in re.findall('\d', c)] for c in self.cnamelist])
+        try:
+            self.track, self.detector = zip(*[[int(i) for i in re.findall(r'\d', c)] for c in self.cnamelist])
+        except ValueError:
+            self.track = tuple(range(len(self.cnamelist)))
+            self.detector = (0,) * len(self.cnamelist)
 
     def __frame__(self, c=0, z=0, t=0):
         f = np.zeros(self.shape[:2], self.dtype)
