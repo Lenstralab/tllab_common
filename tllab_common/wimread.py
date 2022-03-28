@@ -968,7 +968,13 @@ class imread(metaclass=ABCMeta):
             if n is None:
                 czt.append(list(range(self.shape[i])))
             elif isinstance(n, range):
-                czt.append(list(range(*[k % self.shape[i] for k in (n.start, n.stop)], n.step)))
+                if n.stop < 0:
+                    stop = n.stop % self.shape[i]
+                elif n.stop > self.shape[i]:
+                    stop = self.shape[i]
+                else:
+                    stop = n.stop
+                czt.append(list(range(n.start % self.shape[i], stop, n.step)))
             elif isinstance(n, Number):
                 czt.append([n % self.shape[i]])
             else:
