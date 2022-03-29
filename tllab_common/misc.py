@@ -114,22 +114,32 @@ def getParams(parameterfile, templatefile=None, required=None):
     params = getConfig(parameterfile)
 
     # recursively load more parameters from another file
-    def moreParams(params, file):
+    def more_params(params, file):
         if not params.get('moreParams') == none():
             if os.path.isabs(params['moreParams']):
                 moreParamsFile = params['moreParams']
             else:
                 moreParamsFile = os.path.join(os.path.dirname(os.path.abspath(file)), params['moreParams'])
-            print(color('Loading more parameters from {}'.format(moreParamsFile), 'g'))
+            print(color(f'Loading more parameters from {moreParamsFile}', 'g'))
             mparams = getConfig(moreParamsFile)
-            moreParams(mparams, file)
+            more_params(mparams, file)
             for k, v in mparams.items():
                 if k not in params:
                     params[k] = v
 
-    moreParams(params, parameterfile)
+    # recursively check parameters and add defaults
+    def check_params(params, template, path=''):
+        for key, value in template.items():
+            if key not in params and not v == none():
+                print(color(f'Parameter {path}{key} missing in parameter file, adding with default value: {value}.',
+                            'r'))
+                params[key] = value
+            elif isinstance(value, dict):
+                check_params(params[key], value, f'{path}{key}.')
 
-    #  convert string nones to type None
+    more_params(params, parameterfile)
+
+    # convert string nones to type None
     for k, v in params.items():
         if v == none():
             params[k] = None
@@ -137,14 +147,10 @@ def getParams(parameterfile, templatefile=None, required=None):
     if required is not None:
         for p in required:
             if p not in params:
-                raise Exception('Parameter {} not given in parameter file.'.format(p))
+                raise Exception(f'Parameter {p} not given in parameter file.')
 
     if templatefile is not None:
-        for k, v in getConfig(templatefile).items():
-            if k not in params and not v == none():
-                print(color('Parameter {} missing in parameter file, adding with default value: {}.'.format(k, v), 'r'))
-                params[k] = v
-
+        check_params(params, getConfig(templatefile))
     return params
 
 
