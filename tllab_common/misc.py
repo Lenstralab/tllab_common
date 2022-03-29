@@ -139,7 +139,6 @@ def getParams(parameterfile, templatefile=None, required=None):
 
     # recursively convert string nones to type None
     def convert_none(params):
-        print('converting')
         for key, value in params.items():
             if value == none():
                 params[key] = None
@@ -148,7 +147,6 @@ def getParams(parameterfile, templatefile=None, required=None):
 
     convert_none(params)
     more_params(params, parameterfile)
-
 
     if required is not None:
         for p in required:
