@@ -65,7 +65,6 @@ class jvm:
             raise ImportError('python-bioformats and or python-javabridge are not installed')
 
     def kill_vm(self):
-        print('Killing java vm')
         javabridge.kill_vm()
         self.vm_started = False
         self.vm_killed = True
@@ -85,41 +84,44 @@ class ImTransformsExtra(Transforms):
 class ImTransforms(ImTransformsExtra):
     """ Transforms class with methods to calculate channel transforms from bead files etc.
     """
-    def __init__(self, path, cyllens, tracks=None, detectors=None, file=None):
+    def __init__(self, path, cyllens, tracks=None, detectors=None, file=None, transforms=None):
         super().__init__()
         self.cyllens = cyllens
         self.tracks = tracks
         self.detectors = detectors
-        self.shape = (512, 512)
-        self.origin = (255.5, 255.5)
-
-        # TODO: check this
-        if re.search(r'^Pos\d+', os.path.basename(path.rstrip(os.path.sep))):
-            self.path = os.path.dirname(os.path.dirname(path))
-        else:
-            self.path = os.path.dirname(path)
-        if file is not None:
-            if isinstance(file, str) and file.lower().endswith('.yml'):
-                self.ymlpath = file
-                self.beadfile = None
+        if transforms is None:
+            # TODO: check this
+            if re.search(r'^Pos\d+', os.path.basename(path.rstrip(os.path.sep))):
+                self.path = os.path.dirname(os.path.dirname(path))
+            else:
+                self.path = os.path.dirname(path)
+            if file is not None:
+                if isinstance(file, str) and file.lower().endswith('.yml'):
+                    self.ymlpath = file
+                    self.beadfile = None
+                else:
+                    self.ymlpath = os.path.join(self.path, 'transform.yml')
+                    self.beadfile = file
             else:
                 self.ymlpath = os.path.join(self.path, 'transform.yml')
-                self.beadfile = file
-        else:
-            self.ymlpath = os.path.join(self.path, 'transform.yml')
-            self.beadfile = None
-        self.tifpath = self.ymlpath[:-3] + 'tif'
-        try:
-            self.load(self.ymlpath)
-        except Exception:
-            print('No transform file found, trying to generate one.')
-            if not self.files:
-                raise FileNotFoundError('No bead files found to calculate the transform from.')
-            self.calculate_transforms()
-            self.save(self.ymlpath)
-            self.save_transform_tiff()
-            print(f'Saving transform in {self.ymlpath}.')
-            print(f'Please check the transform in {self.tifpath}.')
+                self.beadfile = None
+            self.tifpath = self.ymlpath[:-3] + 'tif'
+            try:
+                self.load(self.ymlpath)
+            except Exception:
+                print('No transform file found, trying to generate one.')
+                if not self.files:
+                    raise FileNotFoundError('No bead files found to calculate the transform from.')
+                self.calculate_transforms()
+                self.save(self.ymlpath)
+                self.save_transform_tiff()
+                print(f'Saving transform in {self.ymlpath}.')
+                print(f'Please check the transform in {self.tifpath}.')
+        else:  # load from dict transforms
+            self.path = path
+            self.beadfile = file
+            for key, value in transforms.items():
+                self[tuple([int(i) for i in key.split(':')])] = Transform(value)
 
     @cached_property
     def files(self):
@@ -135,7 +137,7 @@ class ImTransforms(ImTransformsExtra):
             return ()
 
     def __reduce__(self):
-        return self.__class__, (self.path, self.cyllens, self.tracks, self.detectors, self.files)
+        return self.__class__, (self.path, self.cyllens, self.tracks, self.detectors, self.files, self.asdict())
 
     def __call__(self, channel, time=None, tracks=None, detectors=None):
         tracks = tracks or self.tracks
@@ -212,35 +214,6 @@ class ImTransforms(ImTransformsExtra):
                         for c in range(im.shape[2]):
                             tif.save(np.hstack((im.max(c), jm.max(c))), c, 0, t)
 
-    @staticmethod
-    def get_scale(im):
-        f = np.fft.fft2(im)
-        a = np.fft.fftshift(np.fft.ifft2(f * f.conj()).real)  # acf
-        if np.sum(a > (4 * a.mean() + a.max()) / 5) < 5:  # just noise
-            return np.nan
-        else:
-            p = fitgauss(a, [s / 2 for s in im.shape], True)[0]
-            return p[5]
-
-    @staticmethod
-    def get_e0(im, c):
-        z = np.arange(im.shape[3])
-        e = scipy.signal.savgol_filter([ImTransforms.get_scale(im(c, zi, 0)) for zi in z], 11, 3)
-        s = []
-        for zi in range(im.shape[3]):
-            tmp = np.sqrt([i ** 2 for i in np.gradient(im(0, zi, 0))])
-            s.append(tmp[np.isfinite(tmp)].mean())
-
-        z = z[s > (np.max(s) / 4 + 3 / 4 * np.min(s))]
-        e = e[s > (np.max(s) / 4 + 3 / 4 * np.min(s))]
-
-        plt.plot(z, e)
-
-        z = z[np.isfinite(e)]
-        e = e[np.isfinite(e)]
-
-        return 100 * np.trapz(np.log(e) ** 2, z) / len(e)
-
 
 class ImShiftTransforms(ImTransformsExtra):
     """ Class to handle drift in xy. The image this is applied to must have a channeltransform already, which is then
@@ -254,7 +227,7 @@ class ImShiftTransforms(ImTransformsExtra):
         """
         super().__init__()
         with (imread(im, transform=True, drift=False) if isinstance(im, str)
-                                                    else im.new(transform=True, drift=False)) as im:
+                                                      else im.new(transform=True, drift=False)) as im:
             self.impath = im.path
             self.path = os.path.splitext(self.impath)[0] + '_shifts.txt'
             self.tracks, self.detectors, self.files = im.track, im.detector, im.beadfile
@@ -444,9 +417,9 @@ class xmldata(OrderedDict):
     def _enumdict(d):
         d2 = {}
         for k, v in d.items():
-            idx = [int(i) for i in re.findall('(?<=:)\d+$', k)]
+            idx = [int(i) for i in re.findall(r'(?<=:)\d+$', k)]
             if idx:
-                key = re.findall('^.*(?=:\d+$)', k)[0]
+                key = re.findall(r'^.*(?=:\d+$)', k)[0]
                 if key not in d2:
                     d2[key] = {}
                 d2[key][idx[0]] = d['{}:{}'.format(key, idx[0])]
@@ -454,7 +427,7 @@ class xmldata(OrderedDict):
                 d2[k] = v
         rec = False
         for k, v in d2.items():
-            if [int(i) for i in re.findall('(?<=:)\d+$', k)]:
+            if [int(i) for i in re.findall(r'(?<=:)\d+$', k)]:
                 rec = True
                 break
         if rec:
@@ -521,9 +494,9 @@ class xmldata(OrderedDict):
             return s
         elif len(s) > 1 and s[0] == '[' and s[-1] == ']':
             return [xmldata._output(i) for i in s[1:-1].split(', ')]
-        elif re.search('^[-+]?\d+$', s):
+        elif re.search(r'^[-+]?\d+$', s):
             return int(s)
-        elif re.search('^[-+]?\d?\d*\.?\d+([eE][-+]?\d+)?$', s):
+        elif re.search(r'^[-+]?\d?\d*\.?\d+([eE][-+]?\d+)?$', s):
             return float(s)
         elif s.lower() == 'true':
             return True
@@ -566,7 +539,8 @@ class imread(metaclass=ABCMeta):
             >> im.shape
              << (256, 256, 2, 1, 600)
             >> plt.imshow(im(1, 0, 100))
-             << plots frame at position c=1, z=0, t=100 (python type indexing), note: round brackets; always 2d array with 1 frame
+             << plots frame at position c=1, z=0, t=100 (python type indexing), note: round brackets; always 2d array
+                with 1 frame
             >> data = im[:,:,0,0,:25]
              << retrieves 5d numpy array containing first 25 frames at c=0, z=0, note: square brackets; always 5d array
             >> plt.imshow(im.max(0, None, 0))
@@ -668,12 +642,12 @@ class imread(metaclass=ABCMeta):
         if not hasattr(self, 'cnamelist'):
             self.cnamelist = 'abcdefghijklmnopqrstuvwxyz'[:self.shape[2]]
 
-        if not self.meta is None:
+        if self.meta is not None:
             for key, item in self.meta.items():
                 self.__dict__[key] = item
 
         m = self.extrametadata
-        if not m is None:
+        if m is not None:
             try:
                 self.cyllens = m['CylLens']
                 self.duolink = m['DLFilterSet'].split(' & ')[m['DLFilterChannel']]
@@ -692,7 +666,7 @@ class imread(metaclass=ABCMeta):
             pass
         self.set_transform()
         try:
-            s = int(re.findall('_(\d{3})_', self.duolink)[0])
+            s = int(re.findall(r'_(\d{3})_', self.duolink)[0])
         except Exception:
             s = 561
         if sigma is None:
@@ -865,29 +839,28 @@ class imread(metaclass=ABCMeta):
         if isinstance(n, slice):
             n = (n,)
         if isinstance(n, type(Ellipsis)):
-            n = ()
+            n = (None,) * 5
         if isinstance(n, Number):
             c = n % self.shape[2]
             z = (n // self.shape[2]) % self.shape[3]
             t = (n // (self.shape[2] * self.shape[3])) % self.shape[4]
             n = (c, z, t)
-            # return self.block(None, None, c, z, t)
         n = list(n)
 
         ell = [i for i, e in enumerate(n) if isinstance(e, type(Ellipsis))]
         if len(ell) > 1:
-            raise IndexError("an index can only have a single ellipsis ('Ellipsis')")
+            raise IndexError("an index can only have a single ellipsis (...)")
         if len(ell):
             if len(n) > 5:
                 n.remove(Ellipsis)
             else:
-                n[ell[0]] = slice(None)
-                for i in range(5-len(n)):
-                    n.insert(ell[0], slice(None))
+                n[ell[0]] = None
+                while len(n) not in (3, 5):
+                    n.insert(ell[0], None)
         while len(n) not in (3, 5):
             n.append(0)
         while len(n) < 5:
-            n.insert(0, slice(None))
+            n.insert(0, None)
 
         for i, e in enumerate(n):
             if e is None:
@@ -904,11 +877,7 @@ class imread(metaclass=ABCMeta):
                     if a[j] < 0:
                         a[j] %= self.shape[i]
                 n[i] = np.arange(*a, dtype=int)
-        n = [np.array(i, int) for i in n]
-        if len(n) == 3:
-            return self.block(None, None, *n)
-        if len(n) == 5:
-            return self.block(*n)
+        return self.block(*[np.array(i, int) for i in n])
 
     def __enter__(self):
         return self
@@ -1125,7 +1094,7 @@ class imread(metaclass=ABCMeta):
             if len(idx) == 0:
                 return time, val
             for i in idx:
-                time.append(int(re.search('\d+', n[i]).group(0)))
+                time.append(int(re.search(r'\d+', n[i]).group(0)))
                 val.append(w[i])
             return zip(*sorted(zip(time, val)))
 
@@ -1136,8 +1105,8 @@ class imread(metaclass=ABCMeta):
             # n = self.metadata['LsmTag|Name'][1:-1].split(', ')
             # w = str2float(self.metadata['LsmTag'][1:-1].split(', '))
 
-            pidx = np.where([re.search('^Piezo\s\d+$', x) is not None for x in n])[0]
-            sidx = np.where([re.search('^Zstage\s\d+$', x) is not None for x in n])[0]
+            pidx = np.where([re.search(r'^Piezo\s\d+$', x) is not None for x in n])[0]
+            sidx = np.where([re.search(r'^Zstage\s\d+$', x) is not None for x in n])[0]
 
             ptime, pval = upack(pidx)
             stime, sval = upack(sidx)
@@ -1163,7 +1132,7 @@ class imread(metaclass=ABCMeta):
         df['frame'] = ptime
         df['piezoZ'] = pval
         df['stageZ'] = np.array(sval) - np.array(pval) - \
-                       self.metadata.re_search('AcquisitionModeSetup\|ReferenceZ', 0)[0] * 1e6
+                       self.metadata.re_search(r'AcquisitionModeSetup\|ReferenceZ', 0)[0] * 1e6
 
         # remove duplicates
         df = df[~df.duplicated('frame', 'last')]
@@ -1286,7 +1255,7 @@ class cziread(imread):
         optovar = self.metadata.re_search(('TrackSetup', 'TubeLensPosition'), '1x')
         self.optovar = []
         for o in optovar:
-            a = re.search(r'\d?\d*[,\.]?\d+(?=x$)', o)
+            a = re.search(r'\d?\d*[,.]?\d+(?=x$)', o)
             if hasattr(a, 'group'):
                 self.optovar.append(float(a.group(0).replace(',', '.')))
         self.pcf = [2 ** self.metadata.re_search(('Image', 'ComponentBitCount'), 14)[0] / float(i)
@@ -1352,7 +1321,7 @@ class seqread(imread):
 
         rm = []
         for file in filelist:
-            if not re.search('^img_\d{3,}.*\d{3,}.*\.tif$', file):
+            if not re.search(r'^img_\d{3,}.*\d{3,}.*\.tif$', file):
                 rm.append(file)
 
         for file in rm:
@@ -1363,8 +1332,8 @@ class seqread(imread):
         maxz = 0
         maxt = 0
         for file in filelist:
-            T = re.search('(?<=img_)\d{3,}', file)
-            Z = re.search('\d{3,}(?=\.tif$)', file)
+            T = re.search(r'(?<=img_)\d{3,}', file)
+            Z = re.search(r'\d{3,}(?=\.tif$)', file)
             C = file[T.end() + 1:Z.start() - 1]
             t = int(T.group(0))
             z = int(Z.group(0))
@@ -1412,7 +1381,7 @@ class seqread(imread):
         optovar = self.metadata.search('ZeissOptovar-Label')
         self.optovar = []
         for o in optovar:
-            a = re.search('\d?\d*[,\.]?\d+(?=x$)', o)
+            a = re.search(r'\d?\d*[,.]?\d+(?=x$)', o)
             if hasattr(a, 'group'):
                 self.optovar.append(float(a.group(0).replace(',', '.')))
 
@@ -1455,7 +1424,7 @@ class bfread(imread):
         else:
             image = self.metadata
 
-        unit = lambda u: 10 ** {'nm': 9, 'µm': 6, 'um': 6, u'\xb5m': 6, 'mm': 3, 'm': 0}[u]
+        unit = lambda u: 10 ** {'nm': 9, 'µm': 6, 'um': 6, 'mm': 3, 'm': 0}[u]
 
         pxsizeunit = image.search('PhysicalSizeXUnit')[0]
         pxsize = image.search('PhysicalSizeX')[0]
@@ -1473,18 +1442,18 @@ class bfread(imread):
 
         if self.path.endswith('.lif'):
             self.title = os.path.splitext(os.path.basename(self.path))[0]
-            self.exposuretime = self.metadata.re_search('WideFieldChannelInfo\|ExposureTime', self.exposuretime)
+            self.exposuretime = self.metadata.re_search(r'WideFieldChannelInfo\|ExposureTime', self.exposuretime)
             if self.timeseries:
                 self.settimeinterval = \
-                    self.metadata.re_search('ATLCameraSettingDefinition\|CycleTime', self.settimeinterval * 1e3)[
+                    self.metadata.re_search(r'ATLCameraSettingDefinition\|CycleTime', self.settimeinterval * 1e3)[
                         0] / 1000
                 if not self.settimeinterval:
                     self.settimeinterval = self.exposuretime[0]
-            self.pxsizecam = self.metadata.re_search('ATLCameraSettingDefinition\|TheoCamSensorPixelSizeX',
+            self.pxsizecam = self.metadata.re_search(r'ATLCameraSettingDefinition\|TheoCamSensorPixelSizeX',
                                                      self.pxsizecam)
-            self.objective = self.metadata.re_search('ATLCameraSettingDefinition\|ObjectiveName', 'none')[0]
+            self.objective = self.metadata.re_search(r'ATLCameraSettingDefinition\|ObjectiveName', 'none')[0]
             self.magnification = \
-                self.metadata.re_search('ATLCameraSettingDefinition|Magnification', self.magnification)[0]
+                self.metadata.re_search(r'ATLCameraSettingDefinition\|Magnification', self.magnification)[0]
         elif self.path.endswith('.ims'):
             self.magnification = self.metadata.search('LensPower', 100)[0]
             self.NA = self.metadata.search('NumericalAperture', 1.47)[0]
