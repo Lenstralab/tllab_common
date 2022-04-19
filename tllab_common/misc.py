@@ -163,11 +163,11 @@ def convertParamFile2YML(file):
     """
     with open(file, 'r') as f:
         lines = f.read(-1)
-    with open(re.sub('\.py$', '.yml', file), 'w') as f:
+    with open(re.sub(r'\.py$', '.yml', file), 'w') as f:
         for line in lines.splitlines():
-            if not re.match('^import', line):
-                line = re.sub('(?<!#)\s*=\s*', ': ', line)
-                line = re.sub('(?<!#);', '', line)
+            if not re.match(r'^import', line):
+                line = re.sub(r'(?<!#)\s*=\s*', ': ', line)
+                line = re.sub(r'(?<!#);', '', line)
                 f.write(line+'\n')
 
 
