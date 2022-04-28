@@ -3,11 +3,9 @@
 import sys
 import os
 import numpy as np
-from itertools import product
 from tllab_common.wimread import imread
 from tllab_common.findcells import findcells
-from tllab_common.tiffwrite import IJTiffWriter, tiffwrite
-
+from tiffwrite import IJTiffWriter
 
 fname = os.path.realpath(__file__)
 test_files = os.path.join(os.path.dirname(fname), 'test_files')
@@ -25,39 +23,6 @@ test_files = os.path.join(os.path.dirname(fname), 'test_files')
 # fix the code before committing to gitlab.
 #
 # wp@tl20200124
-
-
-def test_IJTiffWriter(tmp_path):
-    tmp_path = str(tmp_path)
-    shape = (2, 3, 4)
-    dshape = (64, 128)
-    data = np.random.randint(0, 255, dshape + shape[1:])
-    file = os.path.join(tmp_path, 'test.tif')
-    with IJTiffWriter(file, shape) as tif:
-        for n in product(*[range(i) for i in shape[1:]]):
-            tif.save(data[..., n[0], n[1]], 1, *n)
-
-    with imread(file) as im:
-        assert im.shape == dshape + shape, 'shape is wrong'
-        for n in product(*[range(i) for i in shape]):
-            if n[0] == 0:
-                assert np.all(im(*n) == 0), 'zero frames not filled'
-            else:
-                assert np.all(im(*n) == data[..., n[1], n[2]]), 'data not stored correctly'
-
-
-def test_tiffwrite(tmp_path):
-    tmp_path = str(tmp_path)
-    shape = (2, 3, 4)
-    dshape = (64, 128)
-    data = np.random.randint(0, 255, dshape + shape, dtype='uint8')
-    file = os.path.join(tmp_path, 'test2.tif')
-
-    tiffwrite(file, data, 'XYCZT')
-    with imread(file) as im:
-        assert im.shape == dshape + shape, 'shape is wrong'
-        for n in product(*[range(i) for i in shape]):
-            assert np.all(im(*n) == data[..., n[0], n[1], n[2]]), 'data not stored correctly'
 
 
 def test_findcell_a(tmp_path):

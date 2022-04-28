@@ -4,16 +4,12 @@ import os
 import re
 import inspect
 import json
-
-import scipy.signal
-import scipy.optimize
 import untangle
 import pandas
 import tifffile
 import czifile
 import yaml
 import numpy as np
-import matplotlib.pyplot as plt
 from datetime import datetime
 from tqdm.auto import tqdm
 from itertools import product
@@ -23,7 +19,6 @@ from functools import cached_property
 from parfor import parfor
 from tiffwrite import IJTiffWriter
 from tllab_common.transforms import Transform, Transforms
-from tllab_common.tools import fitgauss
 from numbers import Number
 
 try:
@@ -304,18 +299,19 @@ class ImShiftTransforms(ImTransformsExtra):
 class deque_dict(OrderedDict):
     def __init__(self, maxlen=None, *args, **kwargs):
         self.maxlen = maxlen
-        super(deque_dict, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def __truncate__(self):
-        while len(self) > self.maxlen:
-            self.popitem(False)
+        if self.maxlen is not None:
+            while len(self) > self.maxlen:
+                self.popitem(False)
 
     def __setitem__(self, *args, **kwargs):
-        super(deque_dict, self).__setitem__(*args, **kwargs)
+        super().__setitem__(*args, **kwargs)
         self.__truncate__()
 
     def update(self, *args, **kwargs):
-        super(deque_dict, self).update(*args, **kwargs)
+        super().update(*args, **kwargs)
         self.__truncate__()
 
 
