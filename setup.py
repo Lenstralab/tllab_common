@@ -1,5 +1,8 @@
 import setuptools
 import platform
+import os
+
+version = '2022.5.1'
 
 if platform.system().lower() == 'linux':
     import pkg_resources
@@ -9,9 +12,18 @@ with open('README.md', 'r') as fh:
     long_description = fh.read()
 
 
+with open(os.path.join(os.path.dirname(__file__), 'tllab_common', '_version.py'), 'w') as f:
+    f.write(f"__version__ = '{version}'\n")
+    try:
+        import git
+        f.write(f"__git_commit_hash__ = '{git.Repo(os.path.dirname(__file__)).head.object.hexsha}'\n")
+    except Exception:
+        f.write(f"__git_commit_hash__ = 'unknown'\n")
+
+
 setuptools.setup(
     name='tllab_common',
-    version='2022.4.0',
+    version=version,
     author='Lenstra lab NKI',
     author_email='t.lenstra@nki.nl',
     description='Common code for the Lenstra lab.',
@@ -26,7 +38,7 @@ setuptools.setup(
     ],
     python_requires='>=3.7',
     install_requires=['untangle', 'pandas', 'psutil', 'numpy', 'tqdm', 'tifffile', 'czifile', 'pyyaml', 'dill',
-                      'colorcet', 'multipledispatch', 'numba', 'scipy', 'tiffwrite'],
+                      'colorcet', 'multipledispatch', 'numba', 'scipy', 'tiffwrite', 'roifile'],
     extras_require={'transforms': 'SimpleITK-SimpleElastix',
                     'bioformats': ['python-javabridge', 'python-bioformats']},
     tests_require=['pytest-xdist'],

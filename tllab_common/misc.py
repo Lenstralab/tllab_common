@@ -2,6 +2,7 @@ import os
 import re
 import yaml
 from copy import deepcopy
+import roifile
 
 
 loader = yaml.SafeLoader
@@ -15,6 +16,32 @@ loader.add_implicit_resolver(
     |[-+]?\\.(?:inf|Inf|INF)
     |\.(?:nan|NaN|NAN))$''', re.X),
     list(r'-+0123456789.'))
+
+
+def save_roi(file, coordinates, shape, columns=None, name=None):
+        if columns is None:
+            columns = 'xyCzT'
+        coordinates = coordinates.copy()
+        if '_' in columns:
+            coordinates['_'] = 0
+        # if we save coordinates too close to the right and bottom of the image (<1 px) the roi won't open on the image
+        if not coordinates.empty:
+            coordinates = coordinates.query(f'-0.5<={columns[0]}<{shape[1]-1.5} & -0.5<={columns[1]}<{shape[0]-1.5} &'
+                                            f' -0.5<={columns[3]}<={shape[3]-0.5}')
+        if not coordinates.empty:
+            roi = roifile.ImagejRoi.frompoints(coordinates[list(columns[:2])].to_numpy().astype(float))
+            roi.roitype = roifile.ROI_TYPE.POINT
+            roi.options = roifile.ROI_OPTIONS.SUB_PIXEL_RESOLUTION
+            roi.counters = len(coordinates) * [0]
+            roi.counter_positions = (1 + coordinates[columns[2]].to_numpy() +
+                                     coordinates[columns[3]].to_numpy().round().astype(int) * shape[2] +
+                                     coordinates[columns[4]].to_numpy() * shape[2] * shape[3]).astype(int)
+            if name is None:
+                roi.name = ''
+            else:
+                roi.name = name
+            roi.version = 228
+            roi.tofile(file)
 
 
 class color_class(object):

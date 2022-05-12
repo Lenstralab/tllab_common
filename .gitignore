@@ -5,3 +5,4 @@
 /venv/
 .idea
 /.pytest_cache/
+/tllab_common/_version.py
