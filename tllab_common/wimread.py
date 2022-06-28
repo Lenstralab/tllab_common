@@ -1078,7 +1078,7 @@ class imread(metaclass=ABCMeta):
 
     @cached_property
     def timeinterval(self):
-        return float(np.diff(self.timeval).mean())
+        return float(np.diff(self.timeval).mean()) if len(self.timeval) > 1 else 1
 
     @cached_property
     def piezoval(self):
@@ -1349,6 +1349,7 @@ class seqread(imread):
         self.filedict = filedict
         self.cnamelist = [str(cname) for cname in cnamelist]
 
+        # TODO: read omedata from tif without bioformats: read tags 270 and 50838/9
         if (0, 0, 0) in self.filedict:
             path0 = os.path.join(self.path, self.filedict[(0, 0, 0)])
         else:
@@ -1361,25 +1362,27 @@ class seqread(imread):
         self.shape = (int(X), int(Y), maxc + 1, maxz + 1, maxt + 1)
 
         self.pxsize = self.metadata.search('PixelSize_um')[0]
-        if self.pxsize == 0:
-            self.pxsize = 0.065
         if self.zstack:
             self.deltaz = self.metadata.re_search('z-step_um', 0)[0]
         if self.timeseries:
             self.settimeinterval = self.metadata.search('Interval_ms')[0] / 1000
         if re.search('Hamamatsu', self.metadata.search('Core-Camera')[0]):
             self.pxsizecam = 6.5
-        self.magnification = self.pxsizecam / self.pxsize
         self.title = self.metadata.search('Prefix')[0]
         self.acquisitiondate = self.metadata.search('Time')[0]
         self.exposuretime = [i / 1000 for i in self.metadata.search('Exposure-ms')]
         self.objective = self.metadata.search('ZeissObjectiveTurret-Label')[0]
-        optovar = self.metadata.search('ZeissOptovar-Label')
         self.optovar = []
-        for o in optovar:
+        for o in self.metadata.search('ZeissOptovar-Label'):
             a = re.search(r'\d?\d*[,.]?\d+(?=x$)', o)
             if hasattr(a, 'group'):
                 self.optovar.append(float(a.group(0).replace(',', '.')))
+        if self.pxsize == 0:
+            self.magnification = int(re.findall(r'(\d+)x', self.objective)[0]) * self.optovar[0]
+            self.pxsize = self.pxsizecam / self.magnification
+        else:
+            self.magnification = self.pxsizecam / self.pxsize
+
 
     def __frame__(self, c=0, z=0, t=0):
         return tifffile.imread(os.path.join(self.path, self.filedict[(c, z, t)]))
