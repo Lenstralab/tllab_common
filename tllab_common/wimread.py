@@ -17,9 +17,10 @@ from collections import OrderedDict
 from abc import ABCMeta, abstractmethod
 from functools import cached_property
 from parfor import parfor
-from tiffwrite import IJTiffWriter
+from tiffwrite import IJTiffFile
 from tllab_common.transforms import Transform, Transforms
 from numbers import Number
+from argparse import ArgumentParser
 
 try:
     import javabridge
@@ -202,7 +203,7 @@ class ImTransforms(ImTransformsExtra):
         for file in self.files:
             with imread(file) as im:
                 C = max(C, im.shape[2])
-        with IJTiffWriter(self.tifpath, (C, 1, len(self.files))) as tif:
+        with IJTiffFile(self.tifpath, (C, 1, len(self.files))) as tif:
             for t, file in enumerate(self.files):
                 with imread(file) as im:
                     with imread(file, transform=True) as jm:
@@ -1176,7 +1177,7 @@ class imread(metaclass=ABCMeta):
 
             shape = [len(i) for i in n]
             at_least_one = False
-            with IJTiffWriter(fname, shape, pixel_type) as tif:
+            with IJTiffFile(fname, shape, pixel_type, pxsize=self.pxsize, deltaz=self.deltaz) as tif:
                 for i, m in tqdm(zip(product(*[range(s) for s in shape]), product(*n)),
                                  total=np.prod(shape), desc='Saving tiff', disable=not bar):
                     if np.any(self(*m)) or not at_least_one:
@@ -1304,26 +1305,21 @@ class seqread(imread):
         return isinstance(path, str) and os.path.splitext(path)[1] == ''
 
     def __metadata__(self):
-        jvm().start_vm()
-        with open(os.path.join(self.path, 'metadata.txt'), 'r') as metadatafile:
-            metadata = metadatafile.read()
+        filelist = sorted([file for file in os.listdir(self.path) if re.search(r'^img_\d{3,}.*\d{3,}.*\.tif$', file)])
 
-        self.metadata = xmldata(json.loads(metadata))
+        try:
+            with tifffile.TiffFile(os.path.join(self.path, filelist[0])) as tif:
+                self.metadata = xmldata({key: yaml.safe_load(value)
+                                         for key, value in tif.pages[0].tags[50839].value.items()})
+        except Exception:  # fallback
+            with open(os.path.join(self.path, 'metadata.txt'), 'r') as metadatafile:
+                self.metadata = xmldata(json.loads(metadatafile.read()))
 
         # compare channel names from metadata with filenames
-        filelist = os.listdir(self.path)
         cnamelist = self.metadata.search('ChNames')
         cnamelist = [c for c in cnamelist if any([c in f for f in filelist])]
 
-        rm = []
-        for file in filelist:
-            if not re.search(r'^img_\d{3,}.*\d{3,}.*\.tif$', file):
-                rm.append(file)
-
-        for file in rm:
-            filelist.remove(file)
-
-        filedict = {}
+        self.filedict = {}
         maxc = 0
         maxz = 0
         maxt = 0
@@ -1339,34 +1335,25 @@ class seqread(imread):
                 c = len(cnamelist)
                 cnamelist.append(C)
 
-            filedict[(c, z, t)] = file
+            self.filedict[(c, z, t)] = file
             if c > maxc:
                 maxc = c
             if z > maxz:
                 maxz = z
             if t > maxt:
                 maxt = t
-        self.filedict = filedict
         self.cnamelist = [str(cname) for cname in cnamelist]
-
-        # TODO: read omedata from tif without bioformats: read tags 270 and 50838/9
-        if (0, 0, 0) in self.filedict:
-            path0 = os.path.join(self.path, self.filedict[(0, 0, 0)])
-        else:
-            path0 = os.path.join(self.path, self.filedict[sorted(self.filedict)[0]])
-        self.omedataa = untangle.parse(bioformats.get_omexml_metadata(path0))
-        self.metadata = xmldata(dict(self.metadata, **xmldata(self.omedataa)))
 
         X = self.metadata.search('Width')[0]
         Y = self.metadata.search('Height')[0]
         self.shape = (int(X), int(Y), maxc + 1, maxz + 1, maxt + 1)
 
-        self.pxsize = self.metadata.search('PixelSize_um')[0]
+        self.pxsize = self.metadata.re_search(r'(?i)pixelsize_?um', 0)[0]
         if self.zstack:
-            self.deltaz = self.metadata.re_search('z-step_um', 0)[0]
+            self.deltaz = self.metadata.re_search(r'(?i)z-step_?um', 0)[0]
         if self.timeseries:
-            self.settimeinterval = self.metadata.search('Interval_ms')[0] / 1000
-        if re.search('Hamamatsu', self.metadata.search('Core-Camera')[0]):
+            self.settimeinterval = self.metadata.re_search(r'(?i)interval_?ms', 0)[0] / 1000
+        if 'Hamamatsu' in self.metadata.search('Core-Camera', '')[0]:
             self.pxsizecam = 6.5
         self.title = self.metadata.search('Prefix')[0]
         self.acquisitiondate = self.metadata.search('Time')[0]
@@ -1382,7 +1369,8 @@ class seqread(imread):
             self.pxsize = self.pxsizecam / self.magnification
         else:
             self.magnification = self.pxsizecam / self.pxsize
-
+        self.pcf = self.shape[2] * self.metadata.re_search(r'(?i)conversion\sfactor\scoeff', 1)
+        self.filter = self.metadata.search('ZeissReflectorTurret-Label', self.filter)[0]
 
     def __frame__(self, c=0, z=0, t=0):
         return tifffile.imread(os.path.join(self.path, self.filedict[(c, z, t)]))
@@ -1556,3 +1544,30 @@ class tiffread(imread):
 
     def close(self):
         self.tif.close()
+
+
+def main():
+    parser = ArgumentParser(description='Display info and save as tif')
+    parser.add_argument('file', help='image_file')
+    parser.add_argument('out', help='path to tif out', type=str, default=None, nargs='?')
+    parser.add_argument('-r', '--register', help='register channels', action='store_true')
+    parser.add_argument('-c', '--channel', help='channel', type=int, default=None)
+    parser.add_argument('-z', '--zslice', help='z-slice', type=int, default=None)
+    parser.add_argument('-t', '--time', help='time', type=int, default=None)
+    parser.add_argument('-s', '--split', help='split channels', action='store_true')
+    parser.add_argument('-f', '--force', help='force overwrite', action='store_true')
+    args = parser.parse_args()
+
+    if os.path.exists(args.file):
+        with imread(args.file, transform=args.register) as im:
+            print(im.summary)
+            if args.out:
+                out = os.path.abspath(args.out)
+                if not os.path.exists(os.path.dirname(out)):
+                    os.makedirs(os.path.dirname(out))
+                if os.path.exists(out) and not args.force:
+                    print('File {} exists already, add the -f flag if you want to overwrite it.'.format(args.out))
+                else:
+                    im.save_as_tiff(out, args.channel, args.zslice, args.time, args.split)
+    else:
+        print('File does not exist.')

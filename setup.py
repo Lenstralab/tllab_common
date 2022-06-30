@@ -2,7 +2,7 @@ import setuptools
 import platform
 import os
 
-version = '2022.6.0'
+version = '2022.6.1'
 
 if platform.system().lower() == 'linux':
     import pkg_resources
@@ -42,7 +42,7 @@ setuptools.setup(
     extras_require={'transforms': 'SimpleITK-SimpleElastix',
                     'bioformats': ['python-javabridge', 'python-bioformats']},
     tests_require=['pytest-xdist'],
-    scripts=['bin/wimread'],
+    entry_points = {'console_scripts': ['wimread=tllab_common.wimread:main']},
     package_data={'': ['transform.txt']},
     include_package_data=True,
 )

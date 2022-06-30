@@ -1,6 +1,9 @@
 import os
 import re
 import yaml
+import sys
+from traceback import print_exception
+from IPython import embed
 from copy import deepcopy
 import roifile
 
@@ -73,11 +76,11 @@ class color_class(object):
         if not isinstance(fmt, str):
             fmt = str(fmt)
 
-        decorS = [i.group(0) for i in re.finditer('(?<=\:)[a-zA-Z]', fmt)]
-        backcS = [i.group(0) for i in re.finditer('(?<=\.)[a-zA-Z]', fmt)]
-        textcS = [i.group(0) for i in re.finditer('((?<=[^\.\:])|^)[a-zA-Z]', fmt)]
-        backcN = [i.group(0) for i in re.finditer('(?<=\.)\d{1,3}', fmt)]
-        textcN = [i.group(0) for i in re.finditer('((?<=[^\.\:\d])|^)\d{1,3}', fmt)]
+        decorS = [i.group(0) for i in re.finditer(r'(?<=:)[a-zA-Z]', fmt)]
+        backcS = [i.group(0) for i in re.finditer(r'(?<=\.)[a-zA-Z]', fmt)]
+        textcS = [i.group(0) for i in re.finditer(r'((?<=[^.:])|^)[a-zA-Z]', fmt)]
+        backcN = [i.group(0) for i in re.finditer(r'(?<=\.)\d{1,3}', fmt)]
+        textcN = [i.group(0) for i in re.finditer(r'((?<=[^.:\d])|^)\d{1,3}', fmt)]
 
         t = 'krgybmcw'
         d = {'b': 1, 'u': 4, 'r': 7}
@@ -244,3 +247,11 @@ class none():
         if hasattr(other, 'lower') and other.lower() == 'none':
             return True
         return False
+
+
+def ipy_debug(fun=None):
+    """ Enter ipython after an exception occurs any time after executing this. """
+    def excepthook(etype, value, traceback):
+        print_exception(etype, value, traceback)
+        embed(colors='neutral')
+    sys.excepthook = excepthook
