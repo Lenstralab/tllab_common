@@ -1371,6 +1371,8 @@ class seqread(imread):
             self.magnification = self.pxsizecam / self.pxsize
         self.pcf = self.shape[2] * self.metadata.re_search(r'(?i)conversion\sfactor\scoeff', 1)
         self.filter = self.metadata.search('ZeissReflectorTurret-Label', self.filter)[0]
+        self.track = [0] * self.shape[2]
+        self.detector = list(range(self.shape[2]))
 
     def __frame__(self, c=0, z=0, t=0):
         return tifffile.imread(os.path.join(self.path, self.filedict[(c, z, t)]))

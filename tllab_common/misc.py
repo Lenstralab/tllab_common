@@ -249,7 +249,7 @@ class none():
         return False
 
 
-def ipy_debug(fun=None):
+def ipy_debug():
     """ Enter ipython after an exception occurs any time after executing this. """
     def excepthook(etype, value, traceback):
         print_exception(etype, value, traceback)
