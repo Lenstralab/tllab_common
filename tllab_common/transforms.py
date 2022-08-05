@@ -245,7 +245,9 @@ class Transform:
         tfilter.LogToConsoleOff()
         tfilter.SetFixedImage(fix)
         tfilter.SetMovingImage(mov)
-        tfilter.SetParameterMap(sitk.GetDefaultParameterMap(kind))
+        p = sitk.GetDefaultParameterMap(kind)
+        p['NumberOfResolutions'] = ('6',)
+        tfilter.SetParameterMap(p)
         tfilter.Execute()
         transform = tfilter.GetTransformParameterMap()[0]
         if kind == 'affine':
