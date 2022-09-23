@@ -330,7 +330,7 @@ def tolist(item):
         return list((item,))
 
 
-class xmldata(OrderedDict):
+class xmldata(dict):
     def __init__(self, elem):
         super(xmldata, self).__init__()
         if elem:
@@ -471,13 +471,15 @@ class xmldata(OrderedDict):
             children = [xmldata._todict(child) for child in elem.children]
             children = xmldata._unique_children(children)
             if children:
-                d = OrderedDict(d, **children)
+                d = dict(d, **children)
         if hasattr(elem, '_attributes'):
             children = elem._attributes
             if children:
-                d = OrderedDict(d, **children)
+                d = dict(d, **children)
         if not len(d.keys()) and hasattr(elem, 'cdata'):
             return name, elem.cdata
+        if hasattr(elem, 'cdata') and elem.cdata:
+            d = dict(d, **{'cdata': elem.cdata})
 
         return name, xmldata._enumdict(d)
 
@@ -1199,7 +1201,6 @@ class cziread(imread):
     def __metadata__(self):
         # TODO: make sure frame function still works when a subblock has data from more than one frame
         self.reader = czifile.CziFile(self.path)
-        # self.reader.asarray()
         self.shape = tuple([self.reader.shape[self.reader.axes.index(directory_entry)] for directory_entry in 'XYCZT'])
 
         filedict = {}
@@ -1215,33 +1216,35 @@ class cziread(imread):
         self.filedict = filedict
         self.metadata = xmldata(untangle.parse(self.reader.metadata()))
 
-        image = [i for i in self.metadata.search_all('Image').values() if i]
-        if len(image) and self.series in image[0]:
-            image = xmldata(image[0][self.series])
-        else:
-            image = self.metadata
+        unit = lambda u: 10 ** {'nm': 9, 'µm': 6, 'um': 6, 'mm': 3, 'm': 0}[u]
 
-        pxsize = image.search('ScalingX')[0]
-        if pxsize is not None:
-            self.pxsize = pxsize * 1e6
-        if self.zstack:
-            deltaz = image.search('ScalingZ')[0]
-            if deltaz is not None:
-                self.deltaz = deltaz * 1e6
+        for item in self.metadata['ImageDocument']['Metadata']['Scaling']['Items']['Distance']:
+            if item['Id'] == 'X':
+                self.pxsize = float(item['Value']) * unit(item.get('DefaultUnitFormat', 'um'))
+            elif item['Id'] == 'Z':
+                self.deltaz = float(item['Value']) * unit(item.get('DefaultUnitFormat', 'um'))
 
         self.title = self.metadata.re_search(('Information', 'Document', 'Name'), self.title)[0]
         self.acquisitiondate = self.metadata.re_search(('Information', 'Document', 'CreationDate'),
                                                        self.acquisitiondate)[0]
-        self.exposuretime = self.metadata.re_search(('TrackSetup', 'CameraIntegrationTime'), self.exposuretime)
+        exposuretime = self.metadata.re_search(('TrackSetup', 'CameraIntegrationTime'))
+        if not exposuretime or exposuretime[0] is None:
+            exposuretime = [float(e['cdata']) / 1000 for e in self.metadata.re_search(('Detector', 'FrameTime'))]
+        if exposuretime:
+            self.exposuretime = exposuretime
         if self.timeseries:
             self.settimeinterval = self.metadata.re_search(('Interval', 'TimeSpan', 'Value'),
                                                            self.settimeinterval * 1e3)[0] / 1000
             if not self.settimeinterval:
                 self.settimeinterval = self.exposuretime[0]
         self.pxsizecam = self.metadata.re_search(('AcquisitionModeSetup', 'PixelPeriod'), self.pxsizecam)
-        self.magnification = self.metadata.re_search('NominalMagnification', self.magnification)[0]
         attenuators = self.metadata.search_all('Attenuator')
-        self.laserwavelengths = [[1e9 * float(i['Wavelength']) for i in tolist(attenuator)]
+        if attenuators:
+            f = 1e9
+        else:
+            f = 1
+            attenuators = self.metadata.search_all('LightSourceSettings')
+        self.laserwavelengths = [[f * float(i['Wavelength']) for i in tolist(attenuator)]
                                  for attenuator in attenuators.values()]
         self.laserpowers = [[float(i['Transmission']) for i in tolist(attenuator)]
                             for attenuator in attenuators.values()]
@@ -1258,14 +1261,18 @@ class cziread(imread):
         self.pcf = [2 ** self.metadata.re_search(('Image', 'ComponentBitCount'), 14)[0] / float(i)
                     for i in self.metadata.re_search(('Channel', 'PhotonConversionFactor'), 1)]
         self.binning = self.metadata.re_search(('AcquisitionModeSetup', 'CameraBinning'), 1)[0]
-        self.objective = self.metadata.re_search(('AcquisitionModeSetup', 'Objective'))[0]
-        self.NA = self.metadata.re_search(('Instrument', 'Objective', 'LensNA'))[0]
+        self.objective = self.metadata['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']\
+            ['Objective']['Manufacturer']['Model']
+        self.NA = float(self.metadata['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']
+            ['Objective']['LensNA'])
+        self.magnification = int(self.metadata['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']
+            ['Objective']['NominalMagnification'])
         self.filter = self.metadata.re_search(('TrackSetup', 'BeamSplitter', 'Filter'))[0]
         self.tirfangle = [50 * i for i in self.metadata.re_search(('TrackSetup', 'TirfAngle'), 0)]
         self.frameoffset = [self.metadata.re_search(('AcquisitionModeSetup', 'CameraFrameOffsetX'))[0],
                             self.metadata.re_search(('AcquisitionModeSetup', 'CameraFrameOffsetY'))[0]]
         self.cnamelist = [c['DetectorSettings']['Detector']['Id'] for c in
-                          self.metadata['ImageDocument']['Metadata']['Information'].search('Channel')]
+                          self.metadata['ImageDocument']['Metadata']['Information']['Image'].search('Channel')]
         try:
             self.track, self.detector = zip(*[[int(i) for i in re.findall(r'\d', c)] for c in self.cnamelist])
         except ValueError:

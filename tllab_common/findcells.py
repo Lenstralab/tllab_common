@@ -162,7 +162,8 @@ def fill_holes(im):
 # ----------------------- Finally the function itself ---------------------------------
 
 def findcells(im, imnuc=None, cellcolormask=None, ccdist=None, threshold=None, thresholdnuc=None, thres=1, thresnuc=1,
-              smooth=2.5, smoothnuc=2.5, minfeatsize=5, minfeatsizenuc=5, dilate=5, dilatenuc=5, removeborders=True):
+              smooth=2.5, smoothnuc=2.5, minfeatsize=5, minfeatsizenuc=5, dilate=5, dilatenuc=5, removeborders=True,
+              **kwargs):
     #""" segement cells and nuclei from an image (nxm array)
     #    wp@tl20190710
     #
