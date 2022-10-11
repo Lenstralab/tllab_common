@@ -1323,7 +1323,7 @@ class seqread(imread):
                 self.metadata = xmldata(json.loads(metadatafile.read()))
 
         # compare channel names from metadata with filenames
-        cnamelist = self.metadata.search('ChNames')
+        cnamelist = self.metadata.search('ChNames', [])
         cnamelist = [c for c in cnamelist if any([c in f for f in filelist])]
 
         self.filedict = {}
