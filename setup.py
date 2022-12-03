@@ -2,7 +2,7 @@ import setuptools
 import platform
 import os
 
-version = '2022.10.0'
+version = '2022.12.0'
 
 if platform.system().lower() == 'linux':
     import pkg_resources
@@ -15,7 +15,9 @@ with open('README.md', 'r') as fh:
 with open(os.path.join(os.path.dirname(__file__), 'tllab_common', '_version.py'), 'w') as f:
     f.write(f"__version__ = '{version}'\n")
     try:
-        with open(os.path.join(os.path.dirname(__file__), '.git', 'refs', 'heads', 'master')) as h:
+        with open(os.path.join(os.path.dirname(__file__), '.git', 'HEAD')) as g:
+            head = g.read().split(':')[1].strip()
+        with open(os.path.join(os.path.dirname(__file__), '.git', head)) as h:
             f.write("__git_commit_hash__ = '{}'\n".format(h.read().rstrip('\n')))
     except Exception:
         f.write(f"__git_commit_hash__ = 'unknown'\n")

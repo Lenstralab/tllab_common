@@ -9,6 +9,7 @@ import pandas
 import tifffile
 import czifile
 import yaml
+import csv
 import numpy as np
 from datetime import datetime
 from tqdm.auto import tqdm
@@ -21,6 +22,8 @@ from tiffwrite import IJTiffFile
 from tllab_common.transforms import Transform, Transforms
 from numbers import Number
 from argparse import ArgumentParser
+from pathlib import Path
+import xml.etree.ElementTree as ET
 
 try:
     import javabridge
@@ -87,7 +90,7 @@ class ImTransforms(ImTransformsExtra):
         self.detectors = detectors
         if transforms is None:
             # TODO: check this
-            if re.search(r'^Pos\d+', os.path.basename(path.rstrip(os.path.sep))):
+            if re.search(r'^Pos\d+', os.path.basename(path.rstrip(os.path.sep)), re.IGNORECASE):
                 self.path = os.path.dirname(os.path.dirname(path))
             else:
                 self.path = os.path.dirname(path)
@@ -592,14 +595,19 @@ class imread(metaclass=ABCMeta):
         if isinstance(path, imread):
             path = path.path
         for subclass in sorted(cls.__subclasses__(), key=lambda subclass: subclass.priority):
-            if subclass._can_open(path):
+            if subclass._can_open(Path(path)):
                 return super().__new__(subclass)
 
     def __init__(self, path, series=0, transform=False, drift=False, beadfile=None, sigma=None, dtype=None, meta=None):
         if isinstance(path, str):
-            self.path = os.path.abspath(path)
-            self.title = os.path.splitext(os.path.basename(self.path))[0]
-            self.acquisitiondate = datetime.fromtimestamp(os.path.getmtime(self.path)).strftime('%y-%m-%dT%H:%M:%S')
+            path = Path(path)
+        if isinstance(path, Path):
+            self.path = path.absolute()
+            self.title = self.path.stem
+            try:
+                self.acquisitiondate = datetime.fromtimestamp(os.path.getmtime(self.path)).strftime('%y-%m-%dT%H:%M:%S')
+            except Exception:
+                self.acquisitiondate = ''
         else:
             self.path = path  # ndarray
         self.transform = transform
@@ -1196,7 +1204,7 @@ class cziread(imread):
 
     @staticmethod
     def _can_open(path):
-        return isinstance(path, str) and path.endswith('.czi')
+        return isinstance(path, Path) and path.suffix == '.czi'
 
     def __metadata__(self):
         # TODO: make sure frame function still works when a subblock has data from more than one frame
@@ -1304,23 +1312,124 @@ class cziread(imread):
         return sorted(tval[tval > 0])[:self.shape[4]]
 
 
-class seqread(imread):
+class metaread(imread):
     priority = 10
+
+    def __init__(self, path, series=None, *args, **kwargs):
+        path = Path(path)
+        self.acquisitiondate = datetime.fromtimestamp(os.path.getmtime(path.parent)).strftime('%y-%m-%dT%H:%M:%S')
+        if series is None:
+            super().__init__(path, int(re.findall(r'\d+', path.name)[0]), *args, **kwargs)
+        else:
+            super().__init__(path / str(series), series, *args, **kwargs)
 
     @staticmethod
     def _can_open(path):
-        return isinstance(path, str) and os.path.splitext(path)[1] == ''
+        return isinstance(path, Path) and path.parent.suffix.lower() == '.nd' or path.suffix.lower() == '.nd'
 
     def __metadata__(self):
-        filelist = sorted([file for file in os.listdir(self.path) if re.search(r'^img_\d{3,}.*\d{3,}.*\.tif$', file)])
+        filelist = sorted([file for file in os.listdir(self.path.parent.parent)
+                           if re.search(f'_s{self.series}(_|\\.tif$)', file, re.IGNORECASE)])
+        with tifffile.TiffFile(self.path.parent.parent / filelist[0]) as tif:
+            self.metadata = xmldata(tif.metaseries_metadata)
+        self.nd_metadata = xmldata({line[0]: line[1] for line in metaread.parse_nd(
+            csv.reader(self.path.parent.read_text().splitlines()))})
 
+        cnamelist = [self.nd_metadata[f'WaveName{c + 1}'] for c in range(self.nd_metadata['NWavelengths'])]
+        cnamelist = [c for c in cnamelist if any([c in f for f in filelist])]
+
+        self.filedict = {}
+        maxc = 0
+        maxt = 0
+        for file in filelist:
+            C = re.findall('_w([^_]*)(?:_|\.tif$)', file, re.IGNORECASE)[0]
+            T = re.findall('_t([^_]*)(?:_|.tif)', file, re.IGNORECASE)
+            if C in cnamelist:
+                c = cnamelist.index(C)
+            else:
+                c = len(cnamelist)
+                cnamelist.append(C)
+            t = int(T[0]) - 1 if T else 0
+
+            self.filedict[(c, t)] = file
+            if c > maxc:
+                maxc = c
+            if t > maxt:
+                maxt = t
+        self.cnamelist = [str(cname) for cname in cnamelist]
+        X = self.metadata.search('pixel-size-x')[0]
+        Y = self.metadata.search('pixel-size-y')[0]
+        Z = self.nd_metadata.search('NZSteps')[0]
+        self.shape = (Y, X, maxc + 1, Z, maxt + 1)
+        pxsize_unit = self.metadata.search('spatial-calibration-units', 'um')[0]
+        self.pxsize = self.metadata.search('spatial-calibration-x', 1)[0] * \
+                      {'nm': 1e-3, 'um': 1, 'mm': 1e3}[pxsize_unit]
+        self.laserwavelengths = [self.metadata.search('wavelength', [])]
+        self.binning = self.metadata.search('camera-binning-x', 1)[0]
+        self.magnification = int(self.metadata.search('_MagSetting_', 100)[0][:-1])
+        self.NA = self.metadata.search('_MagNA_', 1)[0]
+        exp_time, exp_time_unit = re.findall(r'Exposure:\s?([+-]?(?:\d+(?:[.]\d*)?|[.]\d+))\s?([^\s\d]+)',
+                                             self.metadata['Description'])[0]
+        self.exposuretime = (float(exp_time) * {'us': 1e-6, 'ms': 1e-3, 's': 1}[exp_time_unit],)
+        zpos = []
+        if self.zstack:
+            with tifffile.TiffFile(self.path.parent.parent / self.filedict[0, t]) as tif:
+                for z in range(self.shape[3]):
+                    plane_info = ET.fromstring(tif.pages[z].description).find('PlaneInfo')
+                    for item in plane_info:
+                        if 'id' in item.keys() and item.get('id') == 'z-position':
+                            zpos.append(float(item.get('value')))
+                            break
+        self.deltaz = np.mean(np.diff(zpos))
+
+    @cached_property
+    def timeval(self):
+        timeval = []
+        for t in range(self.shape[4]):
+            with tifffile.TiffFile(self.path.parent.parent / self.filedict[0, t]) as tif:
+                metadata = xmldata(tif.metaseries_metadata)
+                time = datetime.strptime(metadata.search('acquisition-time-local')[0], '%Y%m%d %H:%M:%S.%f')
+                timeval.append(time.timestamp())
+        return timeval
+
+    @staticmethod
+    def parse_nd(lines):
+        for line in lines:
+            if len(line) == 1:
+                yield line[0], None
+            elif len(line) == 2:
+                key, value = line
+                value = value.strip()
+                if value.lower() == 'true':
+                    yield key, True
+                elif value.lower() == 'false':
+                    yield key, False
+                elif value.isnumeric():
+                    yield key, int(value)
+                else:
+                    yield key, value
+
+    def __frame__(self, c=0, z=0, t=0):
+        with tifffile.TiffFile(self.path.parent.parent / self.filedict[c, t]) as tif:
+            return tif.pages[z].asarray()
+
+
+class seqread(imread):
+    priority = 20
+
+    @staticmethod
+    def _can_open(path):
+        return isinstance(path, Path) and path.suffix == ''
+
+    def __metadata__(self):
+        filelist = sorted([file for file in os.listdir(self.path) if re.search(r'^img_\d{3,}.*\d{3,}.*\.tif$', file,
+                                                                               re.IGNORECASE)])
         try:
-            with tifffile.TiffFile(os.path.join(self.path, filelist[0])) as tif:
+            with tifffile.TiffFile(self.path / filelist[0]) as tif:
                 self.metadata = xmldata({key: yaml.safe_load(value)
                                          for key, value in tif.pages[0].tags[50839].value.items()})
         except Exception:  # fallback
-            with open(os.path.join(self.path, 'metadata.txt'), 'r') as metadatafile:
-                self.metadata = xmldata(json.loads(metadatafile.read()))
+            self.metadata = xmldata(json.loads((self.path / 'metadata.txt').read_text()))
 
         # compare channel names from metadata with filenames
         cnamelist = self.metadata.search('ChNames', [])
@@ -1331,8 +1440,8 @@ class seqread(imread):
         maxz = 0
         maxt = 0
         for file in filelist:
-            T = re.search(r'(?<=img_)\d{3,}', file)
-            Z = re.search(r'\d{3,}(?=\.tif$)', file)
+            T = re.search(r'(?<=img_)\d{3,}', file, re.IGNORECASE)
+            Z = re.search(r'\d{3,}(?=\.tif$)', file, re.IGNORECASE)
             C = file[T.end() + 1:Z.start() - 1]
             t = int(T.group(0))
             z = int(Z.group(0))
@@ -1372,7 +1481,7 @@ class seqread(imread):
             if hasattr(a, 'group'):
                 self.optovar.append(float(a.group(0).replace(',', '.')))
         if self.pxsize == 0:
-            self.magnification = int(re.findall(r'(\d+)x', self.objective)[0]) * self.optovar[0]
+            self.magnification = int(re.findall(r'(\d+)x', self.objective, re.IGNORECASE)[0]) * self.optovar[0]
             self.pxsize = self.pxsizecam / self.magnification
         else:
             self.magnification = self.pxsizecam / self.pxsize
@@ -1382,7 +1491,7 @@ class seqread(imread):
         self.detector = list(range(self.shape[2]))
 
     def __frame__(self, c=0, z=0, t=0):
-        return tifffile.imread(os.path.join(self.path, self.filedict[(c, z, t)]))
+        return tifffile.imread(self.path / self.filedict[(c, z, t)])
 
 
 class bfread(imread):
@@ -1436,8 +1545,7 @@ class bfread(imread):
         if not isinstance(self, bfread):
             self.title = self.metadata.search('Name')[0]
 
-        if self.path.endswith('.lif'):
-            self.title = os.path.splitext(os.path.basename(self.path))[0]
+        if self.path.suffix == '.lif':
             self.exposuretime = self.metadata.re_search(r'WideFieldChannelInfo\|ExposureTime', self.exposuretime)
             if self.timeseries:
                 self.settimeinterval = \
@@ -1521,7 +1629,7 @@ class tiffread(imread):
 
     @staticmethod
     def _can_open(path):
-        if isinstance(path, str) and (path.endswith('.tif') or path.endswith('.tiff')):
+        if isinstance(path, Path) and path.suffix.lower() in ('.tiff', '.tif'):
             with tifffile.TiffFile(path) as tif:
                 return tif.is_imagej
         else:
