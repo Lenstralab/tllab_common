@@ -6,7 +6,7 @@ import numpy as np
 from pathlib import Path
 from tllab_common.wimread import imread
 from tllab_common.findcells import findcells
-from tiffwrite import IJTiffWriter
+from tiffwrite import IJTiffFile
 
 fname = Path(__file__)
 test_files = Path(fname).parent / 'test_files'
@@ -21,7 +21,7 @@ wimread = test_files / 'wimread'
 # above this text.
 #
 # Then navigate to the directory containing this file and run ./test.py directly
-# from the terminal. If you see red text then something is wrong and you need to
+# from the terminal. If you see red text then something is wrong, and you need to
 # fix the code before committing to gitlab.
 #
 # wp@tl20200124
@@ -33,9 +33,9 @@ def test_findcell_a(tmp_path):
         assert np.all(c == a(2)), 'Cellmask wrong'
         assert np.all(n == a(3)), 'Nucleusmask wrong'
     files = [tmp_path / f for f in ('cell.tif', 'nucleus.tif')]
-    with IJTiffWriter(files, (1, 1, 1)) as tif:
-        for i, f in enumerate((c, n)):
-            tif.save(i, f, 0, 0, 0)
+    with IJTiffFile(files[0], (1, 1, 1)) as ctif, IJTiffFile(files[1], (1, 1, 1)) as ntif:
+        ctif.save(c, 0, 0, 0)
+        ntif.save(n, 0, 0, 0)
 
     for file, f in zip(files, (c, n)):
         with imread(file) as im:

@@ -1507,8 +1507,8 @@ class bfread(imread):
     def __metadata__(self):
         jvm().start_vm()  # We need java for this :(
         self.key = np.random.randint(1e9)
-        self.reader = bioformats.get_image_reader(self.key, self.path)
-        omexml = bioformats.get_omexml_metadata(self.path)
+        self.reader = bioformats.get_image_reader(self.key, str(self.path))
+        omexml = bioformats.get_omexml_metadata(str(self.path))
         self.metadata = xmldata(untangle.parse(omexml))
 
         s = self.reader.rdr.getSeriesCount()
@@ -1558,7 +1558,7 @@ class bfread(imread):
             self.objective = self.metadata.re_search(r'ATLCameraSettingDefinition\|ObjectiveName', 'none')[0]
             self.magnification = \
                 self.metadata.re_search(r'ATLCameraSettingDefinition\|Magnification', self.magnification)[0]
-        elif self.path.endswith('.ims'):
+        elif self.path.suffix == '.ims':
             self.magnification = self.metadata.search('LensPower', 100)[0]
             self.NA = self.metadata.search('NumericalAperture', 1.47)[0]
             self.title = self.metadata.search('Name', self.title)
