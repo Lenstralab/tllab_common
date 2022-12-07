@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 import os
 import re
 import inspect
@@ -1224,13 +1222,12 @@ class cziread(imread):
         self.filedict = filedict
         self.metadata = xmldata(untangle.parse(self.reader.metadata()))
 
-        unit = lambda u: 10 ** {'nm': 9, 'µm': 6, 'um': 6, 'mm': 3, 'm': 0}[u]
-
+        unit = {'nm': 1e9, 'µm': 1e6, 'um': 1e6, 'mm': 1e3, 'm': 1}
         for item in self.metadata['ImageDocument']['Metadata']['Scaling']['Items']['Distance']:
             if item['Id'] == 'X':
-                self.pxsize = float(item['Value']) * unit(item.get('DefaultUnitFormat', 'um'))
+                self.pxsize = float(item['Value']) * unit[item.get('DefaultUnitFormat', 'um')]
             elif item['Id'] == 'Z':
-                self.deltaz = float(item['Value']) * unit(item.get('DefaultUnitFormat', 'um'))
+                self.deltaz = float(item['Value']) * unit[item.get('DefaultUnitFormat', 'um')]
 
         self.title = self.metadata.re_search(('Information', 'Document', 'Name'), self.title)[0]
         self.acquisitiondate = self.metadata.re_search(('Information', 'Document', 'CreationDate'),
@@ -1269,7 +1266,7 @@ class cziread(imread):
         self.pcf = [2 ** self.metadata.re_search(('Image', 'ComponentBitCount'), 14)[0] / float(i)
                     for i in self.metadata.re_search(('Channel', 'PhotonConversionFactor'), 1)]
         self.binning = self.metadata.re_search(('AcquisitionModeSetup', 'CameraBinning'), 1)[0]
-        self.objective = self.metadata['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']\
+        self.objective = self.metadata['ImageDocument']['Metadata']['Information']['Instrument']['Objectives'] \
             ['Objective']['Manufacturer']['Model']
         self.NA = float(self.metadata['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']
             ['Objective']['LensNA'])
@@ -1342,8 +1339,8 @@ class metaread(imread):
         maxc = 0
         maxt = 0
         for file in filelist:
-            C = re.findall('_w([^_]*)(?:_|\.tif$)', file, re.IGNORECASE)[0]
-            T = re.findall('_t([^_]*)(?:_|.tif)', file, re.IGNORECASE)
+            C = re.findall(r'_w([^_]*)(?:_|\.tif$)', file, re.IGNORECASE)[0]
+            T = re.findall(r'_t([^_]*)(?:_|.tif)', file, re.IGNORECASE)
             if C in cnamelist:
                 c = cnamelist.index(C)
             else:
@@ -1366,14 +1363,14 @@ class metaread(imread):
                       {'nm': 1e-3, 'um': 1, 'mm': 1e3}[pxsize_unit]
         self.laserwavelengths = [self.metadata.search('wavelength', [])]
         self.binning = self.metadata.search('camera-binning-x', 1)[0]
-        self.magnification = int(self.metadata.search('_MagSetting_', 100)[0][:-1])
+        self.magnification = int(re.findall(r'\d+', self.metadata.search('_MagSetting_', '100')[0])[0])
         self.NA = self.metadata.search('_MagNA_', 1)[0]
         exp_time, exp_time_unit = re.findall(r'Exposure:\s?([+-]?(?:\d+(?:[.]\d*)?|[.]\d+))\s?([^\s\d]+)',
                                              self.metadata['Description'])[0]
         self.exposuretime = (float(exp_time) * {'us': 1e-6, 'ms': 1e-3, 's': 1}[exp_time_unit],)
         zpos = []
         if self.zstack:
-            with tifffile.TiffFile(self.path.parent.parent / self.filedict[0, t]) as tif:
+            with tifffile.TiffFile(self.path.parent.parent / self.filedict[0, 0]) as tif:
                 for z in range(self.shape[3]):
                     plane_info = ET.fromstring(tif.pages[z].description).find('PlaneInfo')
                     for item in plane_info:
@@ -1388,7 +1385,9 @@ class metaread(imread):
         for t in range(self.shape[4]):
             with tifffile.TiffFile(self.path.parent.parent / self.filedict[0, t]) as tif:
                 metadata = xmldata(tif.metaseries_metadata)
-                time = datetime.strptime(metadata.search('acquisition-time-local')[0], '%Y%m%d %H:%M:%S.%f')
+                time = metadata.search('acquisition-time-local')[0]
+                if not isinstance(time, datetime):
+                    time = datetime.strptime(metadata.search('acquisition-time-local')[0], '%Y%m%d %H:%M:%S.%f')
                 timeval.append(time.timestamp())
         return timeval
 
@@ -1529,18 +1528,17 @@ class bfread(imread):
         else:
             image = self.metadata
 
-        unit = lambda u: 10 ** {'nm': 9, 'µm': 6, 'um': 6, 'mm': 3, 'm': 0}[u]
-
+        unit = {'nm': 1e9, 'µm': 1e6, 'um': 1e6, 'mm': 1e3, 'm': 1}
         pxsizeunit = image.search('PhysicalSizeXUnit')[0]
         pxsize = image.search('PhysicalSizeX')[0]
         if pxsize is not None:
-            self.pxsize = pxsize / unit(pxsizeunit) * 1e6
+            self.pxsize = pxsize / unit[pxsizeunit] * 1e6
 
         if self.zstack:
             deltazunit = image.search('PhysicalSizeZUnit')[0]
             deltaz = image.search('PhysicalSizeZ')[0]
             if deltaz is not None:
-                self.deltaz = deltaz / unit(deltazunit) * 1e6
+                self.deltaz = deltaz / unit[deltazunit] * 1e6
 
         if not isinstance(self, bfread):
             self.title = self.metadata.search('Name')[0]

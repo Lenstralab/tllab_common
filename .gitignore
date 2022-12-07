@@ -6,3 +6,5 @@
 .idea
 /.pytest_cache/
 /tllab_common/_version.py
+# to big for git:
+/test_files/wimread

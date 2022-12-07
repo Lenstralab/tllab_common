@@ -65,13 +65,13 @@ def test_metaread():
 # ----- This part runs the tests -----
 if __name__ == '__main__':
     if len(sys.argv) < 2:
-        py = ['3.10']
+        py = ['']
     else:
         py = sys.argv[1:]
 
     for p in py:
         print('Testing using python {}'.format(p))
-        os.system('python{} -m pytest -n=12 -p no:warnings --verbose {}'.format(p, fname))
+        os.system(f'python{p} -m pytest -n=12 -p no:warnings --verbose {fname}')
         print('')
 
     imread.kill_vm()
