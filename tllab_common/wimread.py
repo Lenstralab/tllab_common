@@ -62,7 +62,8 @@ class jvm:
             raise ImportError('python-bioformats and or python-javabridge are not installed')
 
     def kill_vm(self):
-        javabridge.kill_vm()
+        if java:
+            javabridge.kill_vm()
         self.vm_started = False
         self.vm_killed = True
 
@@ -1387,7 +1388,7 @@ class metaread(imread):
                 metadata = xmldata(tif.metaseries_metadata)
                 time = metadata.search('acquisition-time-local')[0]
                 if not isinstance(time, datetime):
-                    time = datetime.strptime(metadata.search('acquisition-time-local')[0], '%Y%m%d %H:%M:%S.%f')
+                    time = datetime.strptime(time, '%Y%m%d %H:%M:%S.%f')
                 timeval.append(time.timestamp())
         return timeval
 
