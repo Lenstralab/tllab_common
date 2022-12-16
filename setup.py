@@ -2,7 +2,7 @@ import setuptools
 import platform
 import os
 
-version = '2022.12.2'
+version = '2022.12.3'
 
 if platform.system().lower() == 'linux':
     import pkg_resources
@@ -40,7 +40,7 @@ setuptools.setup(
     ],
     python_requires='>=3.7',
     install_requires=['untangle', 'pandas', 'psutil', 'numpy', 'tqdm', 'tifffile', 'czifile', 'pyyaml', 'dill',
-                      'colorcet', 'multipledispatch', 'numba', 'scipy', 'tiffwrite', 'roifile'],
+                      'colorcet', 'multipledispatch', 'numba', 'scipy', 'tiffwrite', 'roifile', 'ipython'],
     extras_require={'transforms': 'SimpleITK-SimpleElastix',
                     'bioformats': ['python-javabridge', 'python-bioformats']},
     tests_require=['pytest-xdist'],
