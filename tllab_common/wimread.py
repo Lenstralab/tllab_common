@@ -89,7 +89,7 @@ class ImTransforms(ImTransformsExtra):
         self.detectors = detectors
         if transforms is None:
             # TODO: check this
-            if re.search(r'^Pos\d+', os.path.basename(path.rstrip(os.path.sep)), re.IGNORECASE):
+            if re.search(r'^Pos\d+', os.path.basename(path), re.IGNORECASE):
                 self.path = os.path.dirname(os.path.dirname(path))
             else:
                 self.path = os.path.dirname(path)
