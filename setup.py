@@ -2,7 +2,7 @@ import setuptools
 import platform
 import os
 
-version = '2023.3.0'
+version = '2023.3.1'
 
 if platform.system().lower() == 'linux':
     import pkg_resources
@@ -40,7 +40,7 @@ setuptools.setup(
     ],
     python_requires='>=3.7',
     install_requires=['untangle', 'pandas', 'psutil', 'numpy', 'tqdm', 'tifffile', 'czifile', 'pyyaml', 'dill',
-                      'colorcet', 'multipledispatch', 'numba', 'scipy', 'tiffwrite', 'roifile', 'ipython'],
+                      'colorcet', 'multipledispatch', 'scipy', 'tiffwrite', 'roifile', 'ipython'],
     extras_require={'transforms': 'SimpleITK-SimpleElastix',
                     'bioformats': ['python-javabridge', 'python-bioformats']},
     tests_require=['pytest-xdist'],
