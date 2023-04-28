@@ -786,7 +786,7 @@ class imread(metaclass=ABCMeta):
         """
         s = [100 * '#']
         s.append('path/filename: {}'.format(self.path))
-        s.append('shape (xyczt): {} x {} x {} x {} x {}'.format(*self.shape))
+        s.append('shape (yxczt): {} x {} x {} x {} x {}'.format(*self.shape))
         s.append('pixelsize:     {:.2f} nm'.format(self.pxsize * 1000))
         if self.zstack:
             s.append('z-interval:    {:.2f} nm'.format(self.deltaz * 1000))
@@ -1235,7 +1235,7 @@ class cziread(imread):
                                                        self.acquisitiondate)[0]
         exposuretime = self.metadata.re_search(('TrackSetup', 'CameraIntegrationTime'))
         if not exposuretime or exposuretime[0] is None:
-            exposuretime = [float(e['cdata']) / 1000 for e in self.metadata.re_search(('Detector', 'FrameTime'))]
+            exposuretime = [float(e['cdata']) / 1000 for e in self.metadata.re_search(('Detector', 'FrameTime'), [])]
         if exposuretime:
             self.exposuretime = exposuretime
         if self.timeseries:
@@ -1516,12 +1516,12 @@ class bfread(imread):
             print('Series {} does not exist.'.format(self.series))
         self.reader.rdr.setSeries(self.series)
 
-        X = self.reader.rdr.getSizeX()
         Y = self.reader.rdr.getSizeY()
+        X = self.reader.rdr.getSizeX()
         C = self.reader.rdr.getSizeC()
         Z = self.reader.rdr.getSizeZ()
         T = self.reader.rdr.getSizeT()
-        self.shape = (X, Y, C, Z, T)
+        self.shape = (Y, X, C, Z, T)
 
         image = list(self.metadata.search_all('Image').values())
         if len(image) and self.series in image[0]:

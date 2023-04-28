@@ -5,6 +5,8 @@ import sys
 from traceback import print_exception
 from IPython import embed
 from copy import deepcopy
+from dataclasses import dataclass
+from numbers import Number
 import roifile
 
 
@@ -19,6 +21,45 @@ loader.add_implicit_resolver(
     |[-+]?\\.(?:inf|Inf|INF)
     |\.(?:nan|NaN|NAN))$''', re.X),
     list(r'-+0123456789.'))
+
+
+@dataclass
+class ErrorValue:
+    """ format a value and its error with equal significance
+        example f"value = {ErrorValue(1.23234, 0.34463):.2g}"
+    """
+    value: Number
+    error: Number
+
+    def __format__(self, format_spec):
+        notation = re.findall(r'[efgEFG]', format_spec)
+        notation = notation[0] if notation else 'f'
+        value_str = f'{self.value:{format_spec}}'
+        digits = re.findall(r'\d+', format_spec)
+        digits = int(digits[0]) if digits else 0
+        if notation in 'gG':
+            int_part = re.findall(r'^(\d+)', value_str)
+            if int_part:
+                digits -= len(int_part[0])
+                zeros = re.findall(r'^0+', int_part[0])
+                if zeros:
+                    digits += len(zeros[0])
+            frac_part = re.findall(r'.(\d+)', value_str)
+            if frac_part:
+                zeros = re.findall(r'^0+', frac_part[0])
+                if zeros:
+                    digits += len(zeros[0])
+        exp = re.findall(r'[eE]([-+]?\d+)$', value_str)
+        exp = int(exp[0]) if exp else 0
+        error_str = f"{round(self.error * 10 ** -exp, digits):{f'.{digits}f'}}"
+        split = re.findall(r'([^eE]+)([eE][^eE]+)', value_str)
+        if split:
+            return f'({split[0][0]}±{error_str}){split[0][1]}'
+        else:
+            return f'{value_str}±{error_str}'
+
+    def __str__(self):
+        return f"{self}"
 
 
 def save_roi(file, coordinates, shape, columns=None, name=None):
