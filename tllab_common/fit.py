@@ -1,6 +1,6 @@
 import numpy as np
 from functools import cached_property
-from scipy.optimize import minimize
+from scipy.optimize import minimize, OptimizeResult
 from abc import ABCMeta, abstractmethod
 
 
@@ -59,16 +59,15 @@ class Fit(metaclass=ABCMeta):
     def r(self):
         if len(self.x):
             r = minimize(self.get_cost_fun(), self.p0, method='Nelder-Mead', bounds=self.bounds)
-            if self.log_scale:
-                self.chi_squared, self.p_ci95, self.r_squared = fminerr(lambda p, x: np.log(self.fun(p, x)),
-                                                                        r.x, np.log(self.y), (self.x,), self.w)
-            else:
-                self.chi_squared, self.p_ci95, self.r_squared = fminerr(self.fun, r.x, self.y, (self.x,), self.w)
-            self.r_squared_adjusted = 1 - (1 - self.r_squared) * (self.n - 1) / (len(r.x) - 1)
         else:
-            r = None
-            self.chi_squared, self.r_squared, self.r_squared_adjusted = np.nan, np.nan, np.nan
-            self.p_ci95 = np.full(self.n_p, np.nan)
+            r = OptimizeResult(fun=np.nan, message='Empty data', nfev=0, nit=0, status=1, success=False,
+                               x=np.full(self.n_p, np.nan))
+        if self.log_scale:
+            self.chi_squared, self.p_ci95, self.r_squared = fminerr(lambda p, x: np.log(self.fun(p, x)),
+                                                                    r.x, np.log(self.y), (self.x,), self.w)
+        else:
+            self.chi_squared, self.p_ci95, self.r_squared = fminerr(self.fun, r.x, self.y, (self.x,), self.w)
+        self.r_squared_adjusted = 1 - (1 - self.r_squared) * (self.n - 1) / (len(r.x) - 1)
         return r
 
     @property
