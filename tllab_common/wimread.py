@@ -586,6 +586,14 @@ class imread(metaclass=ABCMeta):
     def close(self):
         return
 
+    @staticmethod
+    def split_path_series(path):
+        if isinstance(path, str):
+            path = Path(path)
+        if isinstance(path, Path) and path.name.startswith('Pos'):
+            return path.parent, int(path.name.lstrip('Pos'))
+        return path, 0
+
     def __new__(cls, path, *args, **kwargs):
         if cls is not imread:
             return super().__new__(cls)
@@ -593,13 +601,13 @@ class imread(metaclass=ABCMeta):
             raise Exception('Restart python kernel please!')
         if isinstance(path, imread):
             path = path.path
+        path, _ = imread.split_path_series(path)
         for subclass in sorted(cls.__subclasses__(), key=lambda subclass: subclass.priority):
             if subclass._can_open(Path(path)):
                 return super().__new__(subclass)
 
-    def __init__(self, path, series=0, transform=False, drift=False, beadfile=None, sigma=None, dtype=None, meta=None):
-        if isinstance(path, str):
-            path = Path(path)
+    def __init__(self, path, transform=False, drift=False, beadfile=None, sigma=None, dtype=None, meta=None):
+        path, self.series = self.split_path_series(path)
         if isinstance(path, Path):
             self.path = path.absolute()
             self.title = self.path.stem
@@ -614,7 +622,6 @@ class imread(metaclass=ABCMeta):
         self.beadfile = beadfile
         self.dtype = dtype
         self.shape = (0, 0, 0, 0, 0)
-        self.series = series
         self.meta = meta
         self.pxsize = 1e-1
         self.settimeinterval = 0
@@ -642,8 +649,11 @@ class imread(metaclass=ABCMeta):
         self.cache = deque_dict(16)
         self._frame_decorator = None
         self.frameoffset = (self.shape[0] / 2, self.shape[1] / 2)  # how far apart the centers of frame and sensor are
+        self.len_series = 1
 
         self.__metadata__()
+        if self.series >= self.len_series:
+            raise IndexError(f'Series {self.series} does not exist.')
 
         if not hasattr(self, 'cnamelist'):
             self.cnamelist = 'abcdefghijklmnopqrstuvwxyz'[:self.shape[2]]
@@ -893,7 +903,7 @@ class imread(metaclass=ABCMeta):
             self.close()
 
     def __reduce__(self):
-        return self.__class__, (self.path, self.series, self.transform, self.drift, self.beadfile, self.sigma,
+        return self.__class__, (self.path / f"Pos{self.series}", self.transform, self.drift, self.beadfile, self.sigma,
                                 self.dtype)
 
     def czt(self, n):
@@ -1209,17 +1219,24 @@ class cziread(imread):
         # TODO: make sure frame function still works when a subblock has data from more than one frame
         self.reader = czifile.CziFile(self.path)
         self.shape = tuple([self.reader.shape[self.reader.axes.index(directory_entry)] for directory_entry in 'XYCZT'])
-
+        self.len_series = self.reader.shape[self.reader.axes.index('S')] if 'S' in self.reader.axes else 1
         filedict = {}
         for directory_entry in self.reader.filtered_subblock_directory:
             idx = self.get_index(directory_entry, self.reader.start)
-            for c in range(*idx[self.reader.axes.index('C')]):
-                for z in range(*idx[self.reader.axes.index('Z')]):
-                    for t in range(*idx[self.reader.axes.index('T')]):
-                        if (c, z, t) in filedict:
-                            filedict[(c, z, t)].append(directory_entry)
-                        else:
-                            filedict[(c, z, t)] = [directory_entry]
+            if 'S' in self.reader.axes and self.series in range(*idx[self.reader.axes.index('S')]):
+                for c in range(*idx[self.reader.axes.index('C')]):
+                    for z in range(*idx[self.reader.axes.index('Z')]):
+                        for t in range(*idx[self.reader.axes.index('T')]):
+                            if (c, z, t) in filedict:
+                                filedict[(c, z, t)].append(directory_entry)
+                            else:
+                                filedict[(c, z, t)] = [directory_entry]
+        x_min = min([f.start[f.axes.index('X')] for f in filedict[0, 0, 0]])
+        y_min = min([f.start[f.axes.index('Y')] for f in filedict[0, 0, 0]])
+        x_max = max([f.start[f.axes.index('X')] + f.shape[f.axes.index('X')] for f in filedict[0, 0, 0]])
+        y_max = max([f.start[f.axes.index('Y')] + f.shape[f.axes.index('Y')] for f in filedict[0, 0, 0]])
+        self.shape = (x_max - x_min, y_max - y_min) + \
+                     tuple([self.reader.shape[self.reader.axes.index(directory_entry)] for directory_entry in 'CZT'])
         self.filedict = filedict
         self.metadata = xmldata(untangle.parse(self.reader.metadata()))
 
@@ -1287,12 +1304,17 @@ class cziread(imread):
 
     def __frame__(self, c=0, z=0, t=0):
         f = np.zeros(self.shape[:2], self.dtype)
-        for directory_entry in self.filedict[(c, z, t)]:
+        directory_entries = self.filedict[c, z, t]
+        x_min = min([f.start[f.axes.index('X')] for f in directory_entries])
+        y_min = min([f.start[f.axes.index('Y')] for f in directory_entries])
+        xy_min = {'X': x_min, 'Y': y_min}
+        for directory_entry in directory_entries:
             subblock = directory_entry.data_segment()
             tile = subblock.data(resize=True, order=0)
-            index = [slice(i - j, i - j + k) for i, j, k in
-                     zip(directory_entry.start, self.reader.start, tile.shape)]
-            index = tuple([index[self.reader.axes.index(i)] for i in 'XY'])
+            axes_min = [xy_min.get(ax, 0) for ax in directory_entry.axes]
+            index = [slice(i - j - m, i - j + k)
+                     for i, j, k, m in zip(directory_entry.start, self.reader.start, tile.shape, axes_min)]
+            index = tuple(index[self.reader.axes.index(i)] for i in 'XY')
             f[index] = tile.squeeze()
         return f
 
@@ -1313,17 +1335,9 @@ class cziread(imread):
 class metaread(imread):
     priority = 10
 
-    def __init__(self, path, series=None, *args, **kwargs):
-        path = Path(path)
-        self.acquisitiondate = datetime.fromtimestamp(os.path.getmtime(path.parent)).strftime('%y-%m-%dT%H:%M:%S')
-        if series is None:
-            super().__init__(path, int(re.findall(r'\d+', path.name)[0]), *args, **kwargs)
-        else:
-            super().__init__(path / str(series), series, *args, **kwargs)
-
     @staticmethod
     def _can_open(path):
-        return isinstance(path, Path) and path.parent.suffix.lower() == '.nd' or path.suffix.lower() == '.nd'
+        return isinstance(path, Path) and path.suffix.lower() == '.nd'
 
     def __metadata__(self):
         filelist = sorted([file for file in os.listdir(self.path.parent.parent)
@@ -1422,14 +1436,18 @@ class seqread(imread):
         return isinstance(path, Path) and path.suffix == ''
 
     def __metadata__(self):
-        filelist = sorted([file for file in os.listdir(self.path) if re.search(r'^img_\d{3,}.*\d{3,}.*\.tif$', file,
-                                                                               re.IGNORECASE)])
+        pattern = re.compile(r'^img_\d{3,}.*\d{3,}.*\.tif$', re.IGNORECASE)
+        filelist = sorted([str(file.name)
+                           for file in (self.path / f"Pos{self.series}").iterdir() if pattern.search(str(file.name))])
+        pattern = re.compile('^Pos\d+$')
+        self.len_series = len([file for file in self.path.iterdir() if pattern.search(str(file.name))])
+
         try:
-            with tifffile.TiffFile(self.path / filelist[0]) as tif:
+            with tifffile.TiffFile(self.path / f"Pos{self.series}" / filelist[0]) as tif:
                 self.metadata = xmldata({key: yaml.safe_load(value)
                                          for key, value in tif.pages[0].tags[50839].value.items()})
         except Exception:  # fallback
-            self.metadata = xmldata(json.loads((self.path / 'metadata.txt').read_text()))
+            self.metadata = xmldata(json.loads((self.path / f"Pos{self.series}" / 'metadata.txt').read_text()))
 
         # compare channel names from metadata with filenames
         cnamelist = self.metadata.search('ChNames', [])
@@ -1491,7 +1509,7 @@ class seqread(imread):
         self.detector = list(range(self.shape[2]))
 
     def __frame__(self, c=0, z=0, t=0):
-        return tifffile.imread(self.path / self.filedict[(c, z, t)])
+        return tifffile.imread(self.path / f"Pos{self.series}" / self.filedict[(c, z, t)])
 
 
 class bfread(imread):
@@ -1511,9 +1529,7 @@ class bfread(imread):
         omexml = bioformats.get_omexml_metadata(str(self.path))
         self.metadata = xmldata(untangle.parse(omexml))
 
-        s = self.reader.rdr.getSeriesCount()
-        if self.series >= s:
-            print('Series {} does not exist.'.format(self.series))
+        self.len_series = self.reader.rdr.getSeriesCount()
         self.reader.rdr.setSeries(self.series)
 
         Y = self.reader.rdr.getSizeY()
