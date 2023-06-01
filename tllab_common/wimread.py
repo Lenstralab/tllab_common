@@ -1223,20 +1223,20 @@ class cziread(imread):
         filedict = {}
         for directory_entry in self.reader.filtered_subblock_directory:
             idx = self.get_index(directory_entry, self.reader.start)
-            if 'S' in self.reader.axes and self.series in range(*idx[self.reader.axes.index('S')]):
+            if 'S' not in self.reader.axes or self.series in range(*idx[self.reader.axes.index('S')]):
                 for c in range(*idx[self.reader.axes.index('C')]):
                     for z in range(*idx[self.reader.axes.index('Z')]):
                         for t in range(*idx[self.reader.axes.index('T')]):
                             if (c, z, t) in filedict:
-                                filedict[(c, z, t)].append(directory_entry)
+                                filedict[c, z, t].append(directory_entry)
                             else:
-                                filedict[(c, z, t)] = [directory_entry]
+                                filedict[c, z, t] = [directory_entry]
         x_min = min([f.start[f.axes.index('X')] for f in filedict[0, 0, 0]])
         y_min = min([f.start[f.axes.index('Y')] for f in filedict[0, 0, 0]])
         x_max = max([f.start[f.axes.index('X')] + f.shape[f.axes.index('X')] for f in filedict[0, 0, 0]])
         y_max = max([f.start[f.axes.index('Y')] + f.shape[f.axes.index('Y')] for f in filedict[0, 0, 0]])
         self.shape = (x_max - x_min, y_max - y_min) + \
-                     tuple([self.reader.shape[self.reader.axes.index(directory_entry)] for directory_entry in 'CZT'])
+                     tuple(self.reader.shape[self.reader.axes.index(directory_entry)] for directory_entry in 'CZT')
         self.filedict = filedict
         self.metadata = xmldata(untangle.parse(self.reader.metadata()))
 
