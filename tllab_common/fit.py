@@ -81,25 +81,28 @@ class Fit(metaclass=ABCMeta):
 
     @property
     def bic(self):
+        """ Bayesian Information Criterion: the fit with the smallest bic should be the best fit """
         return self.n_p * np.log(self.n) - 2 * self.log_likelihood
 
     def ftest(self, fit2):
         """ returns the p-value for the hypothesis that fit2 is the better fit,
             assuming fit2 is the fit with more free parameters
-            if the fits are swapped the p-value will be negative
-         """
+            if the fits are swapped the p-value will be negative """
         if not np.all(self.x == fit2.x):
             raise ValueError('Only two fits on the same data can be compared.')
         rss1 = self.get_cost_fun()(self.p)
         rss2 = fit2.get_cost_fun()(fit2.p)
         swapped = np.argmin((self.n_p, fit2.n_p))
-        if (swapped and rss1 > rss2) or (not swapped and rss1 < rss2):
-            raise ValueError('The RSS of the fit with the most free parameters should be the smallest.')
-        n = self.n_p if swapped else fit2.n_p
-        dn = np.abs(self.n_p - fit2.n_p)
-        f_value = (np.abs(rss1 - rss2) / dn) / ((rss1 if swapped else rss2) / (len(self.x) - n))
-        p_value = stats.f(dn, len(self.x) - n).sf(f_value)
-        return -p_value if swapped else p_value
+        if swapped and rss1 > rss2:
+            return -1
+        elif not swapped and rss1 < rss2:
+            return 1
+        else:
+            n = self.n_p if swapped else fit2.n_p
+            dn = np.abs(self.n_p - fit2.n_p)
+            f_value = (np.abs(rss1 - rss2) / dn) / ((rss1 if swapped else rss2) / (len(self.x) - n))
+            p_value = stats.f(dn, len(self.x) - n).sf(f_value)
+            return -p_value if swapped else p_value
 
 
 class Exponential1(Fit):
