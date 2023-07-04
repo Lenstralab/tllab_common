@@ -1098,7 +1098,7 @@ class imread(metaclass=ABCMeta):
 
     @cached_property
     def timeinterval(self):
-        return float(np.diff(self.timeval).mean()) if len(self.timeval) > 1 else 1
+        return float(np.diff(self.timeval).mean()) if len(self.timeval) > 1 else self.settimeinterval
 
     @cached_property
     def piezoval(self):
@@ -1494,6 +1494,7 @@ class seqread(imread):
         self.exposuretime = [i / 1000 for i in self.metadata.search('Exposure-ms')]
         self.objective = self.metadata.search('ZeissObjectiveTurret-Label')[0]
         self.optovar = []
+        self.binning = int(self.metadata.search('Hamamatsu_sCMOS-Binning')[0][0])
         for o in self.metadata.search('ZeissOptovar-Label'):
             a = re.search(r'\d?\d*[,.]?\d+(?=x$)', o)
             if hasattr(a, 'group'):
@@ -1503,6 +1504,7 @@ class seqread(imread):
             self.pxsize = self.pxsizecam / self.magnification
         else:
             self.magnification = self.pxsizecam / self.pxsize
+        self.pxsize *= self.binning
         self.pcf = self.shape[2] * self.metadata.re_search(r'(?i)conversion\sfactor\scoeff', 1)
         self.filter = self.metadata.search('ZeissReflectorTurret-Label', self.filter)[0]
         self.track = [0] * self.shape[2]
