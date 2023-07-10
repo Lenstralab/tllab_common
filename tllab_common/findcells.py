@@ -224,7 +224,7 @@ def findcells(im, imnuc=None, cellcolormask=None, ccdist=None, threshold=None, t
         pk = skimage.feature.peak_local_max(fill_nan(LA), footprint=disk(ccdist), exclude_border=False)
         pk = maskpk(pk, mask)
         pk = np.array(sorted([q.tolist() for q in pk])[::-1])
-        markers = np.zeros(im.shape)
+        markers = np.zeros(im.shape, int)
         for i in range(pk.shape[0]):
             if cellcolormask is None:
                 markers[pk[i, 0], pk[i, 1]] = i+1
