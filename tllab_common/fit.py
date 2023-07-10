@@ -13,9 +13,7 @@ class Fit(metaclass=ABCMeta):
             w = np.ones_like(x)
         else:
             w = np.asarray(w)
-        self.x = x[y > 0]
-        self.y = y[y > 0]
-        self.w = w[y > 0]
+        self.x, self.y, self.w = nonnan(x, y, w)
         self.log_scale = log_scale
         self.n = len(x)
         self.p_ci95 = None
@@ -45,15 +43,17 @@ class Fit(metaclass=ABCMeta):
     def evaluate(self, x=None):
         if x is None:
             x = np.linspace(np.nanmin(self.x), np.nanmax(self.x))
-        return x, self.fun(self.p, x)
+        else:
+            x = np.asarray(x)
+        return x.real, self.fun(self.p, x)
 
     def get_cost_fun(self):
         if self.log_scale:
             def cost(p):
-                return np.sum(self.w * np.log(self.y / self.fun(p, self.x)) ** 2)
+                return np.sum(np.abs(self.w * np.log(self.y / self.fun(p, self.x)) ** 2))
         else:
             def cost(p):
-                return np.sum(self.w * (self.y - self.fun(p, self.x)) ** 2)
+                return np.sum(np.abs(self.w * (self.y - self.fun(p, self.x)) ** 2))
         return cost
 
     @cached_property
@@ -90,6 +90,8 @@ class Fit(metaclass=ABCMeta):
             if the fits are swapped the p-value will be negative """
         if not np.all(self.x == fit2.x):
             raise ValueError('Only two fits on the same data can be compared.')
+        if self.n_p == fit2.n_p:
+            raise ValueError('The two fits cannot have the same number of parameters.')
         rss1 = self.get_cost_fun()(self.p)
         rss2 = fit2.get_cost_fun()(fit2.p)
         swapped = np.argmin((self.n_p, fit2.n_p))
@@ -114,8 +116,8 @@ class Exponential1(Fit):
         """ y = a*exp(-t/tau)
             return a, tau
         """
-        q = np.polyfit(self.x, np.log(self.y), 1)
-        return [np.clip(value, *bound) for value, bound in zip((np.exp(q[1]), -1 / q[0]), self.bounds)]
+        q = np.polyfit(*finite(self.x.astype('complex'), np.log(self.y.astype('complex'))), 1)
+        return [np.clip(value.real, *bound) for value, bound in zip((np.exp(q[1]), -1 / q[0]), self.bounds)]
 
     @staticmethod
     def fun(p, x):
@@ -140,6 +142,32 @@ class Exponential2(Fit):
     @staticmethod
     def fun(p, x):
         return p[0] * (p[1] * np.exp(-x / p[2]) + (1 - p[1]) * np.exp(-x / p[3]))
+
+
+class Powerlaw(Fit):
+    n_p = 2
+
+    @property
+    def p0(self):
+        """ y = (x/tau)^alpha
+            return alpha, tau
+        """
+        q = np.polyfit(*finite(np.log(self.x.astype('complex')), np.log(self.y.astype('complex'))), 1)
+        return q[0].real, np.exp(-q[1] / q[0]).real
+
+    @staticmethod
+    def fun(p, x):
+        return ((x.astype('complex') / p[1]) ** p[0]).real
+
+
+def finite(*args):
+    idx = np.prod([np.isfinite(arg) for arg in args], 0).astype(bool)
+    return [arg[idx] for arg in args]
+
+
+def nonnan(*args):
+    idx = np.prod([~np.isnan(arg) for arg in args], 0).astype(bool)
+    return [arg[idx] for arg in args]
 
 
 def fminerr(fun, a, y, args=(), w=None, diffstep=1e-6):
@@ -185,7 +213,7 @@ def fminerr(fun, a, y, args=(), w=None, diffstep=1e-6):
     r_squared = 1 - ssres / sstot
 
     # calculate derivatives
-    deriv = np.zeros((n_data, n_par))
+    deriv = np.zeros((n_data, n_par), dtype='complex')
     for i in range(n_par):
         ah = a.copy()
         ah[i] = a[i] * (1 + diffstep) + eps
@@ -201,4 +229,4 @@ def fminerr(fun, a, y, args=(), w=None, diffstep=1e-6):
             da = np.sqrt(chisq * np.diag(np.linalg.pinv(hesse)))
     except (Exception,):
         da = np.full_like(a, np.nan)
-    return chisq, 1.96 * da, r_squared
+    return chisq.real, 1.96 * da.real, r_squared.real
