@@ -1433,7 +1433,7 @@ class seqread(imread):
 
     @staticmethod
     def _can_open(path):
-        return isinstance(path, Path) and path.suffix == ''
+        return isinstance(path, Path) and path.is_dir()
 
     def __metadata__(self):
         pattern = re.compile(r'^img_\d{3,}.*\d{3,}.*\.tif$', re.IGNORECASE)
