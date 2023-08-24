@@ -1664,6 +1664,8 @@ class tiffread(imread):
             return False
 
     def __metadata__(self):
+        self.series_available = [0]
+        self.series = self.series or self.series_available[0]
         self.tif = tifffile.TiffFile(self.path)
         self.metadata = self.tif.imagej_metadata
         P = self.tif.pages[0]
