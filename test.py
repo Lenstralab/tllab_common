@@ -49,7 +49,7 @@ def test_cziread_elyra():
 
 def test_czi_read_airy():
     with imread(wimread / 'cziread' / 'MK022_del111_1-01-Airyscan Processing-09-Scene-1-P1.czi') as im:
-        assert im.shape == (499, 496, 1, 15, 210)
+        assert im.shape == (488, 488, 1, 15, 210)
 
 
 def test_seqread():

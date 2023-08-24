@@ -592,7 +592,7 @@ class imread(metaclass=ABCMeta):
             path = Path(path)
         if isinstance(path, Path) and path.name.startswith('Pos'):
             return path.parent, int(path.name.lstrip('Pos'))
-        return path, 0
+        return path, None
 
     def __new__(cls, path, *args, **kwargs):
         if cls is not imread:
@@ -649,10 +649,10 @@ class imread(metaclass=ABCMeta):
         self.cache = deque_dict(16)
         self._frame_decorator = None
         self.frameoffset = (self.shape[0] / 2, self.shape[1] / 2)  # how far apart the centers of frame and sensor are
-        self.len_series = 1
+        self.series_available = [0]
 
         self.__metadata__()
-        if self.series >= self.len_series:
+        if self.series is not None and self.series not in self.series_available:
             raise IndexError(f'Series {self.series} does not exist.')
 
         if not hasattr(self, 'cnamelist'):
@@ -1219,7 +1219,9 @@ class cziread(imread):
         # TODO: make sure frame function still works when a subblock has data from more than one frame
         self.reader = czifile.CziFile(self.path)
         self.shape = tuple([self.reader.shape[self.reader.axes.index(directory_entry)] for directory_entry in 'XYCZT'])
-        self.len_series = self.reader.shape[self.reader.axes.index('S')] if 'S' in self.reader.axes else 1
+        self.series_available = list(range(self.reader.shape[self.reader.axes.index('S')])) if 'S' in self.reader.axes \
+            else [0]
+        self.series = self.series or self.series_available[0]
         filedict = {}
         for directory_entry in self.reader.filtered_subblock_directory:
             idx = self.get_index(directory_entry, self.reader.start)
@@ -1340,12 +1342,17 @@ class metaread(imread):
         return isinstance(path, Path) and path.suffix.lower() == '.nd'
 
     def __metadata__(self):
-        filelist = sorted([file for file in os.listdir(self.path.parent.parent)
-                           if re.search(f'_s{self.series}(_|\\.tif$)', file, re.IGNORECASE)])
-        with tifffile.TiffFile(self.path.parent.parent / filelist[0]) as tif:
+        s = re.compile(r'_s(\d+)(?:_|\.tif$)', re.IGNORECASE)
+        self.series_available = sorted(set([int(m[0]) for file in os.listdir(self.path.parent)
+                                            if len(m := s.findall(file))]))
+        self.series = self.series or self.series_available[0]
+        p = re.compile(f'_s{self.series}(_|\\.tif$)')
+        filelist = sorted([file for file in os.listdir(self.path.parent)
+                           if p.search(file, re.IGNORECASE)])
+        with tifffile.TiffFile(self.path.parent / filelist[0]) as tif:
             self.metadata = xmldata(tif.metaseries_metadata)
         self.nd_metadata = xmldata({line[0]: line[1] for line in metaread.parse_nd(
-            csv.reader(self.path.parent.read_text().splitlines()))})
+            csv.reader(self.path.read_text().splitlines()))})
 
         cnamelist = [self.nd_metadata[f'WaveName{c + 1}'] for c in range(self.nd_metadata['NWavelengths'])]
         cnamelist = [c for c in cnamelist if any([c in f for f in filelist])]
@@ -1385,7 +1392,7 @@ class metaread(imread):
         self.exposuretime = (float(exp_time) * {'us': 1e-6, 'ms': 1e-3, 's': 1}[exp_time_unit],)
         zpos = []
         if self.zstack:
-            with tifffile.TiffFile(self.path.parent.parent / self.filedict[0, 0]) as tif:
+            with tifffile.TiffFile(self.path.parent / self.filedict[0, 0]) as tif:
                 for z in range(self.shape[3]):
                     plane_info = ET.fromstring(tif.pages[z].description).find('PlaneInfo')
                     for item in plane_info:
@@ -1398,7 +1405,7 @@ class metaread(imread):
     def timeval(self):
         timeval = []
         for t in range(self.shape[4]):
-            with tifffile.TiffFile(self.path.parent.parent / self.filedict[0, t]) as tif:
+            with tifffile.TiffFile(self.path.parent / self.filedict[0, t]) as tif:
                 metadata = xmldata(tif.metaseries_metadata)
                 time = metadata.search('acquisition-time-local')[0]
                 if not isinstance(time, datetime):
@@ -1424,7 +1431,7 @@ class metaread(imread):
                     yield key, value
 
     def __frame__(self, c=0, z=0, t=0):
-        with tifffile.TiffFile(self.path.parent.parent / self.filedict[c, t]) as tif:
+        with tifffile.TiffFile(self.path.parent / self.filedict[c, t]) as tif:
             return tif.pages[z].asarray()
 
 
@@ -1440,8 +1447,9 @@ class seqread(imread):
         filelist = sorted([str(file.name)
                            for file in (self.path / f"Pos{self.series}").iterdir() if pattern.search(str(file.name))])
         pattern = re.compile('^Pos\d+$')
-        self.len_series = len([file for file in self.path.iterdir() if pattern.search(str(file.name))])
-
+        self.series_available = sorted([int(file.name[3:]) for file in self.path.iterdir()
+                                        if pattern.search(str(file.name))])
+        self.series = self.series or self.series_available[0]
         try:
             with tifffile.TiffFile(self.path / f"Pos{self.series}" / filelist[0]) as tif:
                 self.metadata = xmldata({key: yaml.safe_load(value)
@@ -1531,7 +1539,8 @@ class bfread(imread):
         omexml = bioformats.get_omexml_metadata(str(self.path))
         self.metadata = xmldata(untangle.parse(omexml))
 
-        self.len_series = self.reader.rdr.getSeriesCount()
+        self.series_available = list(range(self.reader.rdr.getSeriesCount()))
+        self.series = self.series or self.series_available[0]
         self.reader.rdr.setSeries(self.series)
 
         Y = self.reader.rdr.getSizeY()
@@ -1600,6 +1609,8 @@ class ndread(imread):
         return isinstance(path, np.ndarray) and path.ndim in (2, 3, 5)
 
     def __metadata__(self):
+        self.series_available = [0]
+        self.series = self.series or self.series_available[0]
         assert isinstance(self.path, np.ndarray), 'Not a numpy array'
         if np.ndim(self.path) == 5:
             self.shape = self.path.shape

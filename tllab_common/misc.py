@@ -219,10 +219,17 @@ def getParams(parameterfile, templatefile=None, required=None):
     convert_none(params)
     more_params(params, parameterfile)
 
-    if required is not None:
-        for p in required:
-            if p not in params:
-                raise Exception(f'Parameter {p} not given in parameter file.')
+    def check_required(params, required):
+        if required is not None:
+            for p in required:
+                if isinstance(p, dict):
+                    for key, value in p.items():
+                        check_required(params[key], value)
+                else:
+                    if p not in params:
+                        raise Exception(f'Parameter {p} not given in parameter file.')
+
+    check_required(params, required)
 
     if templatefile is not None:
         check_params(params, getConfig(templatefile))
