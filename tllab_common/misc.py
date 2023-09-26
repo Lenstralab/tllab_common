@@ -1,5 +1,5 @@
 import os
-import re
+import regex
 import yaml
 import sys
 import numpy as np
@@ -13,7 +13,7 @@ import roifile
 
 class Struct(dict):
     """ dict where the items are accessible as attributes """
-    key_pattern = re.compile(r'(^(?=\d)|\W)')
+    key_pattern = regex.compile(r'(^(?=\d)|\W)')
 
     def __init__(self, *args, **kwargs):
         super().__init__()
@@ -77,13 +77,13 @@ class Struct(dict):
 loader = yaml.SafeLoader
 loader.add_implicit_resolver(
     r'tag:yaml.org,2002:float',
-    re.compile(r'''^(?:
+    regex.compile(r'''^(?:
      [-+]?(?:[0-9][0-9_]*)\.[0-9_]*(?:[eE][-+]?[0-9]+)?
     |[-+]?(?:[0-9][0-9_]*)(?:[eE][-+]?[0-9]+)
     |\.[0-9_]+(?:[eE][-+][0-9]+)?
     |[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*
     |[-+]?\\.(?:inf|Inf|INF)
-    |\.(?:nan|NaN|NAN))$''', re.X),
+    |\.(?:nan|NaN|NAN))$''', regex.X),
     list(r'-+0123456789.'))
 
 loader.add_constructor('tag:yaml.org,2002:python/dict', Struct.construct_yaml_map)
@@ -100,27 +100,27 @@ class ErrorValue:
     error: Number
 
     def __format__(self, format_spec):
-        notation = re.findall(r'[efgEFG]', format_spec)
+        notation = regex.findall(r'[efgEFG]', format_spec)
         notation = notation[0] if notation else 'f'
         value_str = f'{self.value:{format_spec}}'
-        digits = re.findall(r'\d+', format_spec)
+        digits = regex.findall(r'\d+', format_spec)
         digits = int(digits[0]) if digits else 0
         if notation in 'gG':
-            int_part = re.findall(r'^(\d+)', value_str)
+            int_part = regex.findall(r'^(\d+)', value_str)
             if int_part:
                 digits -= len(int_part[0])
-                zeros = re.findall(r'^0+', int_part[0])
+                zeros = regex.findall(r'^0+', int_part[0])
                 if zeros:
                     digits += len(zeros[0])
-            frac_part = re.findall(r'.(\d+)', value_str)
+            frac_part = regex.findall(r'.(\d+)', value_str)
             if frac_part:
-                zeros = re.findall(r'^0+', frac_part[0])
+                zeros = regex.findall(r'^0+', frac_part[0])
                 if zeros:
                     digits += len(zeros[0])
-        exp = re.findall(r'[eE]([-+]?\d+)$', value_str)
+        exp = regex.findall(r'[eE]([-+]?\d+)$', value_str)
         exp = int(exp[0]) if exp else 0
         error_str = f"{round(self.error * 10 ** -exp, digits):{f'.{digits}f'}}"
-        split = re.findall(r'([^eE]+)([eE][^eE]+)', value_str)
+        split = regex.findall(r'([^eE]+)([eE][^eE]+)', value_str)
         if split:
             return f'({split[0][0]}±{error_str}){split[0][1]}'
         else:
@@ -156,8 +156,54 @@ def save_roi(file, coordinates, shape, columns=None, name=None):
         roi.tofile(file)
 
 
-class Color(object):
-    """ print colored text:
+def cfmt(string):
+    """ format a string for color printing, see cprint """
+    pattern = regex.compile(r'(?:^|[^\\])(?:\\\\)*(<)((?:(?:\\\\)*\\<|[^<])*?)(:)([^:]*?[^:\\](?:\\\\)*)(>)')
+    fmt_split = regex.compile(r'(?:^|\W?)([a-zA-Z]|\d+)?')
+    str_sub = regex.compile(r'(?:^|\\)((?:\\\\)*[<>])')
+
+    def format_fmt(fmt):
+        f = fmt_split.findall(fmt)[:3]
+        color, decoration, background = f + [None] * max(0, (3 - len(f)))
+
+        t = 'krgybmcw'
+        d = {'b': 1, 'u': 4, 'r': 7}
+        text = ''
+        if color:
+            if color.isnumeric() and 0 <= int(color) <= 255:
+                text = f'\033[38;5;{color}m{text}'
+            elif not color.isnumeric() and color.lower() in t:
+                text = f'\033[38;5;{t.index(color.lower())}m{text}'
+        if background:
+            if background.isnumeric() and 0 <= int(background) <= 255:
+                text = f'\033[48;5;{background}m{text}'
+            elif not background.isnumeric() and background.lower() in t:
+                text = f'\033[48;5;{t.index(background.lower())}m{text}'
+        if decoration and decoration.lower() in d:
+            text = f'\033[{d[decoration.lower()]}m{text}'
+        return text
+
+    while matches := pattern.findall(string, overlapped=True):
+        for match in matches:
+            fmt = format_fmt(match[3])
+            sub_string = match[1].replace('\x1b[0m', f'\x1b[0m{fmt}')
+            string = string.replace(''.join(match), f'{fmt}{sub_string}\033[0m')
+    return str_sub.sub(r'\1', string)
+
+
+def cprint(*args, **kwargs):
+    """ print colored text
+        text between <> is colored, escape using \ to print <>
+        text and color format in <> is separated using : and text color, decoration and background color are separated
+        using . or any character not a letter, digit or :
+        colors: 'krgybmcw' or terminal color codes (int up to 255)
+        decorations: b: bold, u: underlined, r: swap color with background color """
+    print(*(cfmt(arg) for arg in args), **kwargs)
+
+
+class Color:
+    """ deprecated: use cprint instead
+        print colored text:
             print(color('Hello World!', 'r:b'))
             print(color % 'r:b' + 'Hello World! + color)
             print(f'{color("r:b")}Hello World!{color}')
@@ -185,11 +231,11 @@ class Color(object):
         if not isinstance(fmt, str):
             fmt = str(fmt)
 
-        decorS = [i.group(0) for i in re.finditer(r'(?<=:)[a-zA-Z]', fmt)]
-        backcS = [i.group(0) for i in re.finditer(r'(?<=\.)[a-zA-Z]', fmt)]
-        textcS = [i.group(0) for i in re.finditer(r'((?<=[^.:])|^)[a-zA-Z]', fmt)]
-        backcN = [i.group(0) for i in re.finditer(r'(?<=\.)\d{1,3}', fmt)]
-        textcN = [i.group(0) for i in re.finditer(r'((?<=[^.:\d])|^)\d{1,3}', fmt)]
+        decorS = [i.group(0) for i in regex.finditer(r'(?<=:)[a-zA-Z]', fmt)]
+        backcS = [i.group(0) for i in regex.finditer(r'(?<=\.)[a-zA-Z]', fmt)]
+        textcS = [i.group(0) for i in regex.finditer(r'((?<=[^.:])|^)[a-zA-Z]', fmt)]
+        backcN = [i.group(0) for i in regex.finditer(r'(?<=\.)\d{1,3}', fmt)]
+        textcN = [i.group(0) for i in regex.finditer(r'((?<=[^.:\d])|^)\d{1,3}', fmt)]
 
         t = 'krgybmcw'
         d = {'b': 1, 'u': 4, 'r': 7}
@@ -250,11 +296,12 @@ def get_params(parameterfile, templatefile=None, required=None):
     """
     # recursively load more parameters from another file
     def more_params(params, file):
-        if not params.get('moreParams') is None:
-            if os.path.isabs(params['moreParams']):
-                moreParamsFile = params['moreParams']
+        more_parameters = params['more_parameters'] or params['more_params'] or params['moreParams']
+        if not more_parameters is None:
+            if os.path.isabs(more_parameters):
+                moreParamsFile = more_parameters
             else:
-                moreParamsFile = os.path.join(os.path.dirname(os.path.abspath(file)), params['moreParams'])
+                moreParamsFile = os.path.join(os.path.dirname(os.path.abspath(file)), more_parameters)
             print(color(f'Loading more parameters from {moreParamsFile}', 'g'))
             mparams = get_config(moreParamsFile)
             more_params(mparams, file)
@@ -291,19 +338,6 @@ def get_params(parameterfile, templatefile=None, required=None):
     return params
 
 
-def convertParamFile2YML(file):
-    """ Convert a py parameter file into a yml file
-    """
-    with open(file, 'r') as f:
-        lines = f.read(-1)
-    with open(re.sub(r'\.py$', '.yml', file), 'w') as f:
-        for line in lines.splitlines():
-            if not re.match(r'^import', line):
-                line = re.sub(r'(?<!#)\s*=\s*', ': ', line)
-                line = re.sub(r'(?<!#);', '', line)
-                f.write(line+'\n')
-
-
 def ipy_debug():
     """ Enter ipython after an exception occurs any time after executing this. """
     def excepthook(etype, value, traceback):
@@ -312,46 +346,56 @@ def ipy_debug():
     sys.excepthook = excepthook
 
 
-def get_slice(array, n):
-    if isinstance(n, slice):
-        n = (n,)
+def get_slice(shape, n):
+    ndim = len(shape)
     if isinstance(n, type(Ellipsis)):
-        n = (None,) * array.ndim
-    if isinstance(n, Number):
-        n = (slice(n),)
-    n = list(n)
+        n = [None] * ndim
+    elif not isinstance(n, (tuple, list)):
+        n = [n]
+    else:
+        n = list(n)
     ell = [i for i, e in enumerate(n) if isinstance(e, type(Ellipsis))]
     if len(ell) > 1:
         raise IndexError('an index can only have a single ellipsis (...)')
     if len(ell):
-        if len(n) > array.ndim:
+        if len(n) > ndim:
             n.remove(Ellipsis)
         else:
             n[ell[0]] = None
-            while len(n) < array.ndim:
+            while len(n) < ndim:
                 n.insert(ell[0], None)
-    while len(n) < array.ndim:
+    while len(n) < ndim:
         n.append(None)
 
     pad = []
-    for i, (e, s) in enumerate(zip(n, array.shape)):
+    for i, (e, s) in enumerate(zip(n, shape)):
         if e is None:
             e = slice(None)
         elif isinstance(e, Number):
-            e = slice(e, e)
-        start, stop, step = int(np.floor(e.start or 0)), int(np.ceil(e.stop or s)), round(e.step or 1)
-        if step != 1:
-            raise NotImplementedError('step sizes other than 1 are not implemented!')
-        pad.append((max(0, -start) // step, max(0, stop - s) // step))
-        if start < 0:
-            start = 0
-        elif start >= s:
-            start = s
-        if stop >= s:
-            stop = s
-        elif stop < 0:
-            stop = 0
-        n[i] = slice(start, stop, step)
+            e = slice(e, e + 1)
+        if isinstance(e, (slice, range)):
+            start = int(np.floor(0 if e.start is None else e.start))
+            stop = int(np.ceil(s if e.stop is None else e.stop))
+            step = round(1 if e.step is None else e.step)
+            if step != 1:
+                raise NotImplementedError('step sizes other than 1 are not implemented!')
+            pad.append((max(0, -start) // step, max(0, stop - s) // step))
+            if start < 0:
+                start = 0
+            elif start >= s:
+                start = s
+            if stop >= s:
+                stop = s
+            elif stop < 0:
+                stop = 0
+            n[i] = slice(start, stop, step)
+        else:
+            a = np.asarray(n[i])
+            if not np.all(a[:-1] <= a[1:]):
+                raise NotImplementedError('unsorted slicing arrays are not supported')
+            n[i] = a[(0 <= a) * (a < s)]
+            pad.append((sum(a < 0), sum(a >= s)))
+
     return n, pad
 
 
@@ -364,7 +408,7 @@ class Crop:
     array: np.ndarray
 
     def __getitem__(self, n):
-        n = get_slice(self.array, n)[0]
+        n = get_slice(self.array.shape, n)[0]
         return np.vstack([(i.start, i.stop) for i in n]), self.array[tuple(n)]
 
 
@@ -377,8 +421,10 @@ class SliceKeepSize:
     default: Number = 0
 
     def __getitem__(self, n):
-        n, pad = get_slice(self.array, n)
-        return np.pad(self.array[tuple(n)], pad, constant_values=self.default)
+        n, pad = get_slice(self.array.shape, n)
+        crop = self.array[tuple(n)]
+        default = self.default(crop) if callable(self.default) else self.default
+        return np.pad(crop, pad, constant_values=default)
 
     def __setitem__(self, n, value):
         n = np.vstack(n)
