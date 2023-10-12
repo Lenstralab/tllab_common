@@ -90,6 +90,8 @@ loader.add_constructor('tag:yaml.org,2002:python/dict', Struct.construct_yaml_ma
 loader.add_constructor('tag:yaml.org,2002:omap', Struct.construct_yaml_map)
 loader.add_constructor('tag:yaml.org,2002:map', Struct.construct_yaml_map)
 
+dumper = yaml.SafeDumper
+dumper.add_representer(Struct, dumper.represent_dict)
 
 @dataclass
 class ErrorValue:
@@ -193,7 +195,7 @@ def cfmt(string):
 
 def cprint(*args, **kwargs):
     """ print colored text
-        text between <> is colored, escape using \ to print <>
+        text between <> is colored, escape using \\ to print <>
         text and color format in <> is separated using : and text color, decoration and background color are separated
         using . or any character not a letter, digit or :
         colors: 'krgybmcw' (darker if capitalized) or terminal color codes (int up to 255)
