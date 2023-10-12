@@ -166,19 +166,19 @@ def cfmt(string):
         f = fmt_split.findall(fmt)[:3]
         color, decoration, background = f + [None] * max(0, (3 - len(f)))
 
-        t = 'krgybmcw'
+        t = 'KRGYBMCWargybmcwk'
         d = {'b': 1, 'u': 4, 'r': 7}
         text = ''
         if color:
             if color.isnumeric() and 0 <= int(color) <= 255:
                 text = f'\033[38;5;{color}m{text}'
-            elif not color.isnumeric() and color.lower() in t:
-                text = f'\033[38;5;{t.index(color.lower())}m{text}'
+            elif not color.isnumeric() and color in t:
+                text = f'\033[38;5;{t.index(color)}m{text}'
         if background:
             if background.isnumeric() and 0 <= int(background) <= 255:
                 text = f'\033[48;5;{background}m{text}'
-            elif not background.isnumeric() and background.lower() in t:
-                text = f'\033[48;5;{t.index(background.lower())}m{text}'
+            elif not background.isnumeric() and background in t:
+                text = f'\033[48;5;{t.index(background)}m{text}'
         if decoration and decoration.lower() in d:
             text = f'\033[{d[decoration.lower()]}m{text}'
         return text
@@ -196,7 +196,7 @@ def cprint(*args, **kwargs):
         text between <> is colored, escape using \ to print <>
         text and color format in <> is separated using : and text color, decoration and background color are separated
         using . or any character not a letter, digit or :
-        colors: 'krgybmcw' or terminal color codes (int up to 255)
+        colors: 'krgybmcw' (darker if capitalized) or terminal color codes (int up to 255)
         decorations: b: bold, u: underlined, r: swap color with background color """
     print(*(cfmt(arg) for arg in args), **kwargs)
 
@@ -302,7 +302,7 @@ def get_params(parameterfile, templatefile=None, required=None):
                 moreParamsFile = more_parameters
             else:
                 moreParamsFile = os.path.join(os.path.dirname(os.path.abspath(file)), more_parameters)
-            print(color(f'Loading more parameters from {moreParamsFile}', 'g'))
+            cprint(f'<Loading more parameters from <{moreParamsFile}:.b>:g>')
             mparams = get_config(moreParamsFile)
             more_params(mparams, file)
             for k, v in mparams.items():
@@ -313,8 +313,7 @@ def get_params(parameterfile, templatefile=None, required=None):
     def check_params(params, template, path=''):
         for key, value in template.items():
             if key not in params and value is not None:
-                print(color(f'Parameter {path}{key} missing in parameter file, adding with default value: {value}.',
-                            'r'))
+                cprint(f'<Parameter <{path}{key}:.b> missing in parameter file, adding with default value: {value}.:r>')
                 params[key] = value
             elif isinstance(value, dict):
                 check_params(params[key], value, f'{path}{key}.')
