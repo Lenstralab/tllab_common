@@ -1,7 +1,7 @@
 import numpy as np
 from functools import cached_property
 from scipy.optimize import minimize, OptimizeResult
-from scipy import stats
+from scipy import stats, special
 from abc import ABCMeta, abstractmethod
 
 
@@ -50,10 +50,10 @@ class Fit(metaclass=ABCMeta):
     def get_cost_fun(self):
         if self.log_scale:
             def cost(p):
-                return np.sum(np.abs(self.w * np.log(self.y / self.fun(p, self.x)) ** 2))
+                return np.nansum(np.abs(self.w * np.log(self.y / self.fun(p, self.x)) ** 2))
         else:
             def cost(p):
-                return np.sum(np.abs(self.w * (self.y - self.fun(p, self.x)) ** 2))
+                return np.nansum(np.abs(self.w * (self.y - self.fun(p, self.x)) ** 2))
         return cost
 
     @cached_property
@@ -131,7 +131,7 @@ class Exponential2(Fit):
     @property
     def p0(self):
         """ y = A(a*exp(-t/tau_0) + (1-a)*exp(-t/tau_1)
-            return A, tau_0, a, tau_1
+            return A, a, tau_0, tau_1
         """
         n = len(self.x) // 2
         y0 = np.nanmax(self.y)
@@ -158,6 +158,24 @@ class Powerlaw(Fit):
     @staticmethod
     def fun(p, x):
         return ((x.astype('complex') / p[1]) ** p[0]).real
+
+
+class GammaCDF(Fit):
+    n_p = 2
+
+    @property
+    def p0(self):
+        """ y = γ(k, x / θ) / Γ(k)
+        """
+        m = np.sum(-self.x[1:] * np.diff(self.y))
+        v = np.sum(-(self.x[1:] - m) ** 2 * np.diff(self.y))
+        return m ** 2 / v, v / m  # A, k, theta
+
+    @staticmethod
+    def fun(p, x):
+        """ p: k, theta """
+        return 1 - special.gammainc(p[0], x / p[1])
+
 
 
 def finite(*args):
