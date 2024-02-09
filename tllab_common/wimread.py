@@ -1493,18 +1493,18 @@ class seqread(imread):
 
         self.pxsize = self.metadata.re_search(r'(?i)pixelsize_?um', 0)[0]
         if self.zstack:
-            self.deltaz = self.metadata.re_search(r'(?i)z-step_?um', 0)[0]
+            self.deltaz = self.metadata.re_search(r'(?i)z_step_?um', 0)[0]
         if self.timeseries:
             self.settimeinterval = self.metadata.re_search(r'(?i)interval_?ms', 0)[0] / 1000
-        if 'Hamamatsu' in self.metadata.search('Core-Camera', '')[0]:
+        if 'Hamamatsu' in self.metadata.search('Core_Camera', '')[0]:
             self.pxsizecam = 6.5
         self.title = self.metadata.search('Prefix')[0]
         self.acquisitiondate = self.metadata.search('Time')[0]
-        self.exposuretime = [i / 1000 for i in self.metadata.search('Exposure-ms')]
-        self.objective = self.metadata.search('ZeissObjectiveTurret-Label')[0]
+        self.exposuretime = [i / 1000 for i in self.metadata.search('Exposure_ms')]
+        self.objective = self.metadata.search('ZeissObjectiveTurret_Label')[0]
         self.optovar = []
-        self.binning = int(self.metadata.search('Hamamatsu_sCMOS-Binning')[0][0])
-        for o in self.metadata.search('ZeissOptovar-Label'):
+        self.binning = int(self.metadata.search('Hamamatsu_sCMOS_Binning')[0][0])
+        for o in self.metadata.search('ZeissOptovar_Label'):
             a = re.search(r'\d?\d*[,.]?\d+(?=x$)', o)
             if hasattr(a, 'group'):
                 self.optovar.append(float(a.group(0).replace(',', '.')))
@@ -1515,7 +1515,7 @@ class seqread(imread):
             self.magnification = self.pxsizecam / self.pxsize
         self.pxsize *= self.binning
         self.pcf = self.shape[2] * self.metadata.re_search(r'(?i)conversion\sfactor\scoeff', 1)
-        self.filter = self.metadata.search('ZeissReflectorTurret-Label', self.filter)[0]
+        self.filter = self.metadata.search('ZeissReflectorTurret_Label', self.filter)[0]
         self.track = [0] * self.shape[2]
         self.detector = list(range(self.shape[2]))
 
