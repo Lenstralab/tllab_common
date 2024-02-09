@@ -1,4 +1,5 @@
 import os
+
 import regex
 import yaml
 import sys
@@ -67,11 +68,10 @@ class Struct(dict):
             self[key] = value
 
     @staticmethod
-    def construct_yaml_map(y, node):
+    def construct_yaml_map(loader, node):
         data = Struct()
         yield data
-        value = y.construct_mapping(node)
-        data.update(value)
+        data.update(loader.construct_mapping(node))
 
 
 loader = yaml.SafeLoader

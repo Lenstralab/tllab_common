@@ -116,8 +116,11 @@ class Exponential1(Fit):
         """ y = a*exp(-t/tau)
             return a, tau
         """
-        q = np.polyfit(*finite(self.x.astype('complex'), np.log(self.y.astype('complex'))), 1)
-        return [np.clip(value.real, *bound) for value, bound in zip((np.exp(q[1]), -1 / q[0]), self.bounds)]
+        if len(self.x) < 2:
+            return [1, 1]
+        else:
+            q = np.polyfit(*finite(self.x.astype('complex'), np.log(self.y.astype('complex'))), 1)
+            return [np.clip(value.real, *bound) for value, bound in zip((np.exp(q[1]), -1 / q[0]), self.bounds)]
 
     @staticmethod
     def fun(p, x):

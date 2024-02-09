@@ -903,8 +903,7 @@ class imread(metaclass=ABCMeta):
             self.close()
 
     def __reduce__(self):
-        return self.__class__, (self.path / f"Pos{self.series}", self.transform, self.drift, self.beadfile, self.sigma,
-                                self.dtype)
+        return self.__class__, (self.path, self.transform, self.drift, self.beadfile, self.sigma, self.dtype)
 
     def czt(self, n):
         """ returns indices c, z, t used when calling im(n)
@@ -1443,19 +1442,21 @@ class seqread(imread):
         return isinstance(path, Path) and path.is_dir()
 
     def __metadata__(self):
+        pattern = re.compile(r'(?:\d+-)?Pos.*')
+        if pattern.match(self.path.name) is None:
+            self.path = self.path / f"Pos{self.series}"
+        self.series = self.path.name
+        self.series_available = [self.series]
         pattern = re.compile(r'^img_\d{3,}.*\d{3,}.*\.tif$', re.IGNORECASE)
         filelist = sorted([str(file.name)
-                           for file in (self.path / f"Pos{self.series}").iterdir() if pattern.search(str(file.name))])
-        pattern = re.compile('^Pos\d+$')
-        self.series_available = sorted([int(file.name[3:]) for file in self.path.iterdir()
-                                        if pattern.search(str(file.name))])
-        self.series = self.series or self.series_available[0]
+                           for file in self.path.iterdir() if pattern.search(str(file.name))])
+
         try:
-            with tifffile.TiffFile(self.path / f"Pos{self.series}" / filelist[0]) as tif:
+            with tifffile.TiffFile(self.path / filelist[0]) as tif:
                 self.metadata = xmldata({key: yaml.safe_load(value)
                                          for key, value in tif.pages[0].tags[50839].value.items()})
         except Exception:  # fallback
-            self.metadata = xmldata(json.loads((self.path / f"Pos{self.series}" / 'metadata.txt').read_text()))
+            self.metadata = xmldata(json.loads((self.path / 'metadata.txt').read_text()))
 
         # compare channel names from metadata with filenames
         cnamelist = self.metadata.search('ChNames', [])
@@ -1519,7 +1520,7 @@ class seqread(imread):
         self.detector = list(range(self.shape[2]))
 
     def __frame__(self, c=0, z=0, t=0):
-        return tifffile.imread(self.path / f"Pos{self.series}" / self.filedict[(c, z, t)])
+        return tifffile.imread(self.path / self.filedict[(c, z, t)])
 
 
 class bfread(imread):
