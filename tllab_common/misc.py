@@ -460,7 +460,10 @@ class Data(metaclass=ABCMeta):
 
     @classmethod
     def load(cls, file):
-        file = Path(max(glob(str(file)))).resolve()
+        files = glob(str(file))
+        if len(files) == 0:
+            raise FileNotFoundError
+        file = Path(max(files)).resolve()
         with open(file, 'rb') as f:
             new = pickle.load(f)
         new.__class__ = cls
