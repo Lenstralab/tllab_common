@@ -1,15 +1,22 @@
 import os
-
-import regex
-import yaml
+import pickle
 import sys
-import numpy as np
-from traceback import print_exception
-from IPython import embed
+from abc import ABCMeta
 from copy import deepcopy
 from dataclasses import dataclass
+from datetime import datetime
+from glob import glob
 from numbers import Number
+from pathlib import Path
+from traceback import format_exc, print_exception
+
+import numpy as np
+import regex
 import roifile
+import yaml
+from IPython import embed
+
+from .io import pickle_dump
 
 
 class Struct(dict):
@@ -92,6 +99,7 @@ loader.add_constructor('tag:yaml.org,2002:map', Struct.construct_yaml_map)
 
 dumper = yaml.SafeDumper
 dumper.add_representer(Struct, dumper.represent_dict)
+
 
 @dataclass
 class ErrorValue:
@@ -299,7 +307,7 @@ def get_params(parameterfile, templatefile=None, required=None):
     # recursively load more parameters from another file
     def more_params(params, file):
         more_parameters = params['more_parameters'] or params['more_params'] or params['moreParams']
-        if not more_parameters is None:
+        if more_parameters is not None:
             if os.path.isabs(more_parameters):
                 moreParamsFile = more_parameters
             else:
@@ -434,6 +442,77 @@ class SliceKeepSize:
             value = np.asarray(value)[idx]
         if n.size:
             self.array[tuple(n[:, idx])] = value
+
+
+class Data(metaclass=ABCMeta):
+    params = None
+
+    def __init__(self):
+        self.stage = set()
+        self.runtime = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args, **kwargs):
+        self.error = format_exc(), args, kwargs
+        self.save()
+
+    @classmethod
+    def load(cls, file):
+        file = Path(max(glob(str(file)))).resolve()
+        with open(file, 'rb') as f:
+            new = pickle.load(f)
+        new.__class__ = cls
+        new.file = file
+        return new
+
+    @staticmethod
+    def stage_rec(fun):
+        def wrap(self, *args, **kwargs):
+            res = fun(self, *args, **kwargs)
+            self.stage.add(fun.__name__)
+            return res
+
+        return wrap
+
+    def save(self, file=None):
+        if file is None and hasattr(self, 'folder_out'):
+            file = self.folder_out / f'{self.__class__.__name__.lower()}_{self.runtime}.pickle'
+        if file is not None:
+            pickle_dump(self, file)
+
+    @classmethod
+    def load_from_parameter_file(cls, parameter_file):
+        parameter_file = Path(parameter_file)
+        params = getParams(parameter_file.with_suffix('.yml'), required=({'paths': ('folder_out',)},))
+        if Path(params['paths']['folder_out']).exists():
+            pickles = [file for file in Path(params['paths']['folder_out']).iterdir()
+                       if file.name.startswith(f'{cls.__name__.lower()}_') and file.suffix == '.pickle']
+        else:
+            pickles = None
+        if not pickles:
+            raise FileNotFoundError(
+                f"No files matching {Path(params['paths']['folder_out']) / f'{cls.__name__.lower()}_*.pickle'}")
+        return cls.load(max(pickles))
+
+    def run(self):
+        self.runtime = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    def clean(self):
+        if Path(self.params['paths']['folder_out']).exists():
+            pickles = [file for file in Path(self.params['paths']['folder_out']).iterdir()
+                       if file.name.startswith(f'{self.__class__.__name__.lower()}_') and file.suffix == '.pickle']
+            if pickles:
+                pickles.remove(max(pickles))
+                for pickle in pickles:
+                    pickle.unlink()
+
+    def color(self, color_or_channel):
+        return color_or_channel if isinstance(color_or_channel, str) else self.channels[color_or_channel]
+
+    def channel(self, color_or_channel):
+        return self.colors[color_or_channel] if isinstance(color_or_channel, str) else color_or_channel
 
 
 color = Color()
