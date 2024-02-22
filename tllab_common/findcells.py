@@ -227,7 +227,8 @@ def findcells(im, imnuc=None, cellcolormask=None, ccdist=None, threshold=None, t
         cells = skimage.segmentation.watershed(-LA, markers=markers, mask=mask)
         cells *= mask  # in Python2, watershed sometimes colors outside the mask
         lbl = list(np.unique(cells))
-        lbl.remove(0)
+        if 0 in lbl:
+            lbl.remove(0)
         cells = fill_holes(cells)
         nuclei = np.zeros(im.shape)        
         for i in tqdm(lbl, disable=len(lbl) < 25, leave=False):  # threshold each cell to find its nucleus
