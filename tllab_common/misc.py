@@ -455,7 +455,7 @@ class Data(metaclass=ABCMeta):
         return self
 
     def __exit__(self, *args, **kwargs):
-        self.error = format_exc(), args, kwargs
+        self.error = format_exc()
         self.save()
 
     @classmethod
