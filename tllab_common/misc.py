@@ -1,5 +1,5 @@
-import os
 import pickle
+import re
 import sys
 from abc import ABCMeta
 from copy import deepcopy
@@ -9,14 +9,15 @@ from glob import glob
 from numbers import Number
 from pathlib import Path
 from traceback import format_exc, print_exception
+from typing import Sequence
 
 import numpy as np
+import pandas
 import regex
-import roifile
-import yaml
+from ruamel import yaml
 from IPython import embed
 
-from .io import pickle_dump
+from .io import pickle_dump, get_params, yaml_load
 
 
 class Struct(dict):
@@ -74,28 +75,6 @@ class Struct(dict):
         for key, value in kwargs.items():
             self[key] = value
 
-    @staticmethod
-    def construct_yaml_map(loader, node):
-        data = Struct()
-        yield data
-        data.update(loader.construct_mapping(node))
-
-
-loader = yaml.SafeLoader
-loader.add_implicit_resolver(
-    r'tag:yaml.org,2002:float',
-    regex.compile(r'''^(?:
-     [-+]?(?:[0-9][0-9_]*)\.[0-9_]*(?:[eE][-+]?[0-9]+)?
-    |[-+]?(?:[0-9][0-9_]*)(?:[eE][-+]?[0-9]+)
-    |\.[0-9_]+(?:[eE][-+][0-9]+)?
-    |[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*
-    |[-+]?\\.(?:inf|Inf|INF)
-    |\.(?:nan|NaN|NAN))$''', regex.X),
-    list(r'-+0123456789.'))
-
-loader.add_constructor('tag:yaml.org,2002:python/dict', Struct.construct_yaml_map)
-loader.add_constructor('tag:yaml.org,2002:omap', Struct.construct_yaml_map)
-loader.add_constructor('tag:yaml.org,2002:map', Struct.construct_yaml_map)
 
 dumper = yaml.SafeDumper
 dumper.add_representer(Struct, dumper.represent_dict)
@@ -109,20 +88,21 @@ class ErrorValue:
     value: Number
     error: Number
 
-    def __format__(self, format_spec):
+    def __format__(self, format_spec: str) -> str:
         notation = regex.findall(r'[efgEFG]', format_spec)
         notation = notation[0] if notation else 'f'
         value_str = f'{self.value:{format_spec}}'
         digits = regex.findall(r'\d+', format_spec)
-        digits = int(digits[0]) if digits else 0
+        if digits:
+            digits = int(digits[0])
+        else:
+            frac_part = regex.findall(r'\.(\d+)', value_str)
+            digits = len(frac_part[0]) if frac_part else 0
         if notation in 'gG':
-            int_part = regex.findall(r'^(\d+)', value_str)
+            int_part = regex.findall(r'^[-+]?(\d+)', value_str)
             if int_part:
                 digits -= len(int_part[0])
-                zeros = regex.findall(r'^0+', int_part[0])
-                if zeros:
-                    digits += len(zeros[0])
-            frac_part = regex.findall(r'.(\d+)', value_str)
+            frac_part = regex.findall(r'\.(\d+)', value_str)
             if frac_part:
                 zeros = regex.findall(r'^0+', frac_part[0])
                 if zeros:
@@ -136,43 +116,17 @@ class ErrorValue:
         else:
             return f'{value_str}±{error_str}'
 
-    def __str__(self):
-        return f"{self}"
+    def __str__(self) -> str:
+        return f'{self}'
 
 
-def save_roi(file, coordinates, shape, columns=None, name=None):
-    if columns is None:
-        columns = 'xyCzT'
-    coordinates = coordinates.copy()
-    if '_' in columns:
-        coordinates['_'] = 0
-    # if we save coordinates too close to the right and bottom of the image (<1 px) the roi won't open on the image
-    if not coordinates.empty:
-        coordinates = coordinates.query(f'-0.5<={columns[0]}<{shape[1]-1.5} & -0.5<={columns[1]}<{shape[0]-1.5} &'
-                                        f' -0.5<={columns[3]}<={shape[3]-0.5}')
-    if not coordinates.empty:
-        roi = roifile.ImagejRoi.frompoints(coordinates[list(columns[:2])].to_numpy().astype(float))
-        roi.roitype = roifile.ROI_TYPE.POINT
-        roi.options = roifile.ROI_OPTIONS.SUB_PIXEL_RESOLUTION
-        roi.counters = len(coordinates) * [0]
-        roi.counter_positions = (1 + coordinates[columns[2]].to_numpy() +
-                                 coordinates[columns[3]].to_numpy().round().astype(int) * shape[2] +
-                                 coordinates[columns[4]].to_numpy() * shape[2] * shape[3]).astype(int)
-        if name is None:
-            roi.name = ''
-        else:
-            roi.name = name
-        roi.version = 228
-        roi.tofile(file)
-
-
-def cfmt(string):
+def cfmt(string: str) -> str:
     """ format a string for color printing, see cprint """
     pattern = regex.compile(r'(?:^|[^\\])(?:\\\\)*(<)((?:(?:\\\\)*\\<|[^<])*?)(:)([^:]*?[^:\\](?:\\\\)*)(>)')
     fmt_split = regex.compile(r'(?:^|\W?)([a-zA-Z]|\d+)?')
     str_sub = regex.compile(r'(?:^|\\)((?:\\\\)*[<>])')
 
-    def format_fmt(fmt):
+    def format_fmt(fmt: str) -> str:
         f = fmt_split.findall(fmt)[:3]
         color, decoration, background = f + [None] * max(0, (3 - len(f)))
 
@@ -209,6 +163,24 @@ def cprint(*args, **kwargs):
         colors: 'krgybmcw' (darker if capitalized) or terminal color codes (int up to 255)
         decorations: b: bold, u: underlined, r: swap color with background color """
     print(*(cfmt(arg) for arg in args), **kwargs)
+
+
+def format_list(string: str, lst: Sequence, fmt: str = None) -> str:
+    """ format a list in a grammatically correct way
+        example: format_list('in {channel|channels}: {}', (1, 2, 5))
+            'in channels: 1, 2 and 5'
+    """
+    if fmt is None:
+        fmt = ''
+    string = string.replace('{}', '{0}')
+    plurals = re.findall(r'{([^|{}]+)\|([^|{}]+)}', string)
+    for i, option in enumerate(plurals, start=1):
+        string = string.replace(f'{{{option[0]}|{option[1]}}}', f'{{{i}}}')
+    if len(lst) == 1:
+        return string.format(f'{lst[0]:{fmt}}', *[option[0] for option in plurals])
+    else:
+        return string.format(', '.join([f'{i:{fmt}}' for i in lst[:-1]]) + f' and {lst[-1]:{fmt}}',
+                             *[option[1] for option in plurals])
 
 
 class Color:
@@ -291,60 +263,6 @@ class Color:
 
     def __repr__(self):
         return self._fmt()
-
-
-def get_config(file):
-    """ Open a yml parameter file
-    """
-    with open(file, 'r') as f:
-        return yaml.load(f, loader)
-
-
-def get_params(parameterfile, templatefile=None, required=None):
-    """ Load parameters from a parameterfile and parameters missing from that from the templatefile. Raise an error when
-        parameters in required are missing. Return a dictionary with the parameters.
-    """
-    # recursively load more parameters from another file
-    def more_params(params, file):
-        more_parameters = params['more_parameters'] or params['more_params'] or params['moreParams']
-        if more_parameters is not None:
-            if os.path.isabs(more_parameters):
-                moreParamsFile = more_parameters
-            else:
-                moreParamsFile = os.path.join(os.path.dirname(os.path.abspath(file)), more_parameters)
-            cprint(f'<Loading more parameters from <{moreParamsFile}:.b>:g>')
-            mparams = get_config(moreParamsFile)
-            more_params(mparams, file)
-            for k, v in mparams.items():
-                if k not in params:
-                    params[k] = v
-
-    # recursively check parameters and add defaults
-    def check_params(params, template, path=''):
-        for key, value in template.items():
-            if key not in params and value is not None:
-                cprint(f'<Parameter <{path}{key}:.b> missing in parameter file, adding with default value: {value}.:r>')
-                params[key] = value
-            elif isinstance(value, dict):
-                check_params(params[key], value, f'{path}{key}.')
-
-    def check_required(params, required):
-        if required is not None:
-            for p in required:
-                if isinstance(p, dict):
-                    for key, value in p.items():
-                        check_required(params[key], value)
-                else:
-                    if p not in params:
-                        raise Exception(f'Parameter {p} not given in parameter file.')
-
-    params = get_config(parameterfile)
-    more_params(params, parameterfile)
-    check_required(params, required)
-
-    if templatefile is not None:
-        check_params(params, get_config(templatefile))
-    return params
 
 
 def ipy_debug():
@@ -518,7 +436,23 @@ class Data(metaclass=ABCMeta):
         return self.colors[color_or_channel] if isinstance(color_or_channel, str) else color_or_channel
 
 
+def df_join(h: pandas.DataFrame) -> pandas.DataFrame:
+    """ join DataFrames given by the first indices of h on the other indices
+    """
+    groups = h.groupby(level=0)
+    n = len(groups)
+    for a, (i, g) in enumerate(groups):
+        if a == 0:
+            df = g.droplevel(0)
+        elif a == n - 1:
+            return df.join(g.droplevel(0), lsuffix=f'_{j:.0f}', rsuffix=f'_{i:.0f}')
+        else:
+            df = df.join(g.droplevel(0), lsuffix=f'_{j:.0f}')
+        j = i
+
+
 color = Color()
+get_config = yaml_load
 getConfig = get_config
 getParams = get_params
 objFromDict = Struct

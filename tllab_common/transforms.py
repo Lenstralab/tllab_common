@@ -1,8 +1,11 @@
-import yaml
+# depracated, use ndbioimage
+
 import os
-import numpy as np
-from copy import deepcopy
 from collections import OrderedDict
+from copy import deepcopy
+
+import numpy as np
+from ruamel import yaml
 
 try:
     # best if SimpleElastix is installed: https://simpleelastix.readthedocs.io/GettingStarted.html

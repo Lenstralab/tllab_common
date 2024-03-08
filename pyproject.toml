@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "tllab_common"
-version = "2024.2.5"
+version = "2024.3.0"
 description = "Common code for the Lenstra lab."
 authors = ["Lenstra lab NKI <t.lenstra@nki.nl>"]
 license = "GPLv3"
@@ -10,7 +10,7 @@ include = ["transform.txt"]
 repository = "https://github.com/Lenstralab/tllab_common"
 
 [tool.poetry.dependencies]
-python = "^3.8"
+python = "^3.10"
 untangle = "*"
 pandas  = "*"
 psutil = "*"
@@ -18,7 +18,7 @@ numpy = "*"
 tqdm = "*"
 tifffile = "*"
 czifile = "*"
-pyyaml = "*"
+"ruamel.yaml" = "*"
 dill = "*"
 colorcet = "*"
 scipy = "*"
