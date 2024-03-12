@@ -66,9 +66,9 @@ def zip_dump(obj, stream=None, *args, **kwargs):
 class Loader(yaml.Loader):
     bidict_cache = {}
 
-    def __init__(self, path):
+    def __init__(self, path, *args, **kwargs):
         self.zip_stream = zipfile.ZipFile(path, 'r')
-        super().__init__(self.zip_stream.open('object.yml', 'r'))
+        super().__init__(self.zip_stream.open('object.yml', 'r'), *args, **kwargs)
 
     def close(self):
         self.stream.close()
@@ -219,11 +219,11 @@ def yaml_load(stream):
 
 
 @wraps(yaml.dump)
-def yaml_dump(data, stream):
+def yaml_dump(data, stream=None):
     with ExitStack() as stack:
         if isinstance(stream, (str, bytes, Path)):
             stream = stack.enter_context(open(stream, 'w'))
-        yaml.dump(data, stream, Dumper=RoundTripDumper)
+        return yaml.dump(data, stream, Dumper=RoundTripDumper)
 
 
 def get_params(parameter_file: [str, Path], template_file: [str, Path] = None,
