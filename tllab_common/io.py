@@ -4,7 +4,8 @@ from contextlib import ExitStack
 from functools import wraps
 from io import BytesIO, StringIO
 from pathlib import Path
-from typing import Any, Hashable, Iterator
+from typing import Any, Callable, Hashable, Iterator, IO, Optional, Sequence, Type
+import shutil
 
 import dill
 import numpy as np
@@ -14,8 +15,8 @@ from bidict import bidict
 from ruamel import yaml
 
 
-class Dumper(yaml.Dumper):
-    def __init__(self, path, *args, **kwargs):
+class ZipDumper(yaml.Dumper):
+    def __init__(self, path: [str, Path], *args, **kwargs):
         super().__init__(StringIO(), *args, **kwargs)
         self.zip_stream = zipfile.ZipFile(path, 'w')
 
@@ -26,47 +27,39 @@ class Dumper(yaml.Dumper):
         self.zip_stream.close()
 
 
-def yd_register(t):
-    def proxy(func):
-        Dumper.add_representer(t, func)
+def zip_dump_register(t: Type) -> Callable:
+    def proxy(func: Callable) -> Callable:
+        ZipDumper.add_representer(t, func)
         return func
 
     return proxy
 
 
-@yd_register(pandas.DataFrame)
-def represent_pandas(dumper: Dumper, df):
+@zip_dump_register(pandas.DataFrame)
+def represent_pandas(dumper: ZipDumper, df: pandas.DataFrame) -> yaml.ScalarNode:
     file = f'{id(df)}.tsv'
     with dumper.zip_stream.open(file, 'w') as f:
         df.to_csv(f, sep='\t', index=False)
     return dumper.represent_scalar('!DataFrame', file)
 
 
-@yd_register(np.ndarray)
-def represent_numpy(dumper: Dumper, array):
+@zip_dump_register(np.ndarray)
+def represent_numpy(dumper: ZipDumper, array: np.ndarray) -> yaml.ScalarNode:
     file = f'{id(array)}.npy'
     with dumper.zip_stream.open(file, 'w') as f:
         np.save(f, array)
     return dumper.represent_scalar('!ndarray', file)
 
 
-@yd_register(bidict)
-def represent_bidict(self, bd):
-    if id(bd.inverse) in self.represented_objects:
-        return self.represent_mapping('!bidict', {'dict': bd.inverse._fwdm, 'inverse': True})
-    else:
-        return self.represent_mapping('!bidict', {'dict': bd._fwdm, 'inverse': False})
-
-
 @wraps(yaml.dump)
-def zip_dump(obj, stream=None, *args, **kwargs):
-    return yaml.dump(obj, stream, Dumper, *args, **kwargs)
+def zip_dump(obj: Any, stream: IO = None, *args, **kwargs) -> Optional[str]:
+    return yaml.dump(obj, stream, ZipDumper, *args, **kwargs)
 
 
-class Loader(yaml.Loader):
+class ZipLoader(yaml.Loader):
     bidict_cache = {}
 
-    def __init__(self, path, *args, **kwargs):
+    def __init__(self, path: [str, Path], *args, **kwargs):
         self.zip_stream = zipfile.ZipFile(path, 'r')
         super().__init__(self.zip_stream.open('object.yml', 'r'), *args, **kwargs)
 
@@ -75,40 +68,29 @@ class Loader(yaml.Loader):
         self.zip_stream.close()
 
 
-def yl_register(t):
-    def proxy(func):
-        Loader.add_constructor(t, func)
+def zip_load_register(t: str) -> Callable:
+    def proxy(func: Callable) -> Callable:
+        ZipLoader.add_constructor(t, func)
         return func
 
     return proxy
 
 
-@yl_register('!DataFrame')
-def construct_pandas(loader, node):
+@zip_load_register('!DataFrame')
+def construct_pandas(loader: ZipLoader, node: yaml.ScalarNode) -> pandas.DataFrame:
     with loader.zip_stream.open(loader.construct_python_str(node), 'r') as f:
         return pandas.read_table(f)
 
 
-@yl_register('!ndarray')
-def construct_numpy(loader, node):
+@zip_load_register('!ndarray')
+def construct_numpy(loader: ZipLoader, node: yaml.ScalarNode) -> np.ndarray:
     with loader.zip_stream.open(loader.construct_python_str(node), 'r') as f:
         return np.load(f)
 
 
-@yl_register('!bidict')
-def construct_bidict(loader, node):
-    mapping = loader.construct_mapping(node, deep=True)
-    dct, inverse = mapping['dict'], mapping['inverse']
-    bdct = loader.bidict_cache.get(id(dct))
-    if bdct is None:
-        bdct = bidict(dct)
-        loader.bidict_cache[id(dct)] = bdct
-    return bdct.inverse if inverse else bdct
-
-
 @wraps(yaml.load)
-def zip_load(stream):
-    return yaml.load(stream, Loader)
+def zip_load(stream: IO) -> Any:
+    return yaml.load(stream, ZipLoader)
 
 
 class Pickler(dill.Pickler):
@@ -120,10 +102,10 @@ class Pickler(dill.Pickler):
         self.bd_undilled = {}  # {id(dict): bidict}
 
 
-def dill_register(t):
+def dill_register(t: Type) -> Callable:
     """decorator to register types to Pickler's :attr:`~Pickler.dispatch` table"""
 
-    def proxy(func):
+    def proxy(func: Callable) -> Callable:
         Pickler.dispatch[t] = func
         return func
 
@@ -143,10 +125,10 @@ def undill_bidict(dct: dict, inverse: bool, undilled: dict) -> bidict:
 def dill_bidict(pickler: Pickler, bd: bidict):
     """ pickle bidict such that relationships between bidicts is preserved upon unpickling """
     if id(bd.inverse) in pickler.bd_dilled:
-        pickler.save_reduce(undill_bidict, (bd.inverse._fwdm, True, pickler.bd_undilled), obj=bd)
+        pickler.save_reduce(undill_bidict, (bd.inverse._fwdm, True, pickler.bd_undilled), obj=bd)  # noqa
     else:
         pickler.bd_dilled.append(id(bd))
-        pickler.save_reduce(undill_bidict, (bd._fwdm, False, pickler.bd_undilled), obj=bd)
+        pickler.save_reduce(undill_bidict, (bd._fwdm, False, pickler.bd_undilled), obj=bd)  # noqa
 
 
 @dill_register(pandas.DataFrame)
@@ -156,7 +138,7 @@ def dill_dataframe(pickler: Pickler, df: pandas.DataFrame):
 
 
 @wraps(pickle.dump)
-def pickle_dump(obj, file=None, *args, **kwargs):
+def pickle_dump(obj, file: Optional[IO] = None, *args, **kwargs) -> Optional[str]:
     with ExitStack() as stack:
         if isinstance(file, (str, Path)):
             f = stack.enter_context(open(file, 'wb'))
@@ -170,7 +152,7 @@ def pickle_dump(obj, file=None, *args, **kwargs):
 
 
 @wraps(pickle.load)
-def pickle_load(file):
+def pickle_load(file: [bytes, str, Path, IO]) -> Any:
     if isinstance(file, bytes):
         return pickle.loads(file)
     elif isinstance(file, (str, Path)):
@@ -180,7 +162,7 @@ def pickle_load(file):
         return pickle.load(file)
 
 
-class CommentedDefaultMap(yaml.comments.CommentedMap):
+class CommentedDefaultMap(yaml.CommentedMap):
     def __missing__(self, key: Hashable) -> Any:
         return None
 
@@ -194,7 +176,7 @@ class RoundTripLoader(yaml.RoundTripLoader):
 
 def construct_yaml_map(loader, node: Any) -> Iterator[CommentedDefaultMap]:
     data = CommentedDefaultMap()
-    data._yaml_set_line_col(node.start_mark.line, node.start_mark.column)
+    data._yaml_set_line_col(node.start_mark.line, node.start_mark.column)  # noqa
     yield data
     loader.construct_mapping(node, data, deep=True)
     loader.set_collection_style(data, node)
@@ -211,7 +193,7 @@ RoundTripDumper.add_representer(CommentedDefaultMap, RoundTripDumper.represent_d
 
 
 @wraps(yaml.load)
-def yaml_load(stream):
+def yaml_load(stream: [str, bytes, Path, IO]) -> Any:
     with ExitStack() as stack:
         if isinstance(stream, (str, bytes, Path)):
             stream = stack.enter_context(open(stream, 'r'))
@@ -219,7 +201,7 @@ def yaml_load(stream):
 
 
 @wraps(yaml.dump)
-def yaml_dump(data, stream=None):
+def yaml_dump(data: Any, stream: Optional[IO] = None) -> Optional[str]:
     with ExitStack() as stack:
         if isinstance(stream, (str, bytes, Path)):
             stream = stack.enter_context(open(stream, 'w'))
@@ -258,7 +240,7 @@ def get_params(parameter_file: [str, Path], template_file: [str, Path] = None,
             elif isinstance(value, dict):
                 check_params(parameters[key], value, f'{path}{key}.')
 
-    def check_required(parameters: dict, required: dict) -> None:
+    def check_required(parameters: dict, required: dict) -> None:  # noqa
         if required is not None:
             for p in required:
                 if isinstance(p, dict):
@@ -277,7 +259,8 @@ def get_params(parameter_file: [str, Path], template_file: [str, Path] = None,
     return params
 
 
-def save_roi(file, coordinates, shape, columns=None, name=None):
+def save_roi(file: [str, Path], coordinates: pandas.DataFrame, shape: tuple, columns: Optional[Sequence[str]] = None,
+             name: Optional[str] = None):
     if columns is None:
         columns = 'xyCzT'
     coordinates = coordinates.copy()
@@ -301,3 +284,95 @@ def save_roi(file, coordinates, shape, columns=None, name=None):
             roi.name = name
         roi.version = 228
         roi.tofile(file)
+
+
+class DataFileDumper(yaml.Dumper):
+    @wraps(yaml.Dumper.__init__)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.path = Path(self.stream.name).with_suffix('')
+        shutil.rmtree(self.path)
+        self.path.mkdir(parents=True)
+
+
+def dfd_register(t: Type) -> Callable:
+    def proxy(func: Callable) -> Callable:
+        DataFileDumper.add_representer(t, func)
+        return func
+
+    return proxy
+
+
+@dfd_register(bidict)
+@zip_dump_register(bidict)
+def represent_bidict(dumper: yaml.Dumper, bd: bidict) -> yaml.MappingNode:
+    if id(bd.inverse) in dumper.represented_objects:
+        return dumper.represent_mapping('!bidict', {'dict': bd.inverse._fwdm, 'inverse': True})  # noqa
+    else:
+        return dumper.represent_mapping('!bidict', {'dict': bd._fwdm, 'inverse': False})  # noqa
+
+
+@dfd_register(pandas.DataFrame)
+def represent_pandas(dumper: DataFileDumper, df: pandas.DataFrame) -> yaml.ScalarNode:
+    path = dumper.path / f'{id(df)}.tsv'
+    with open(path, 'w') as f:
+        df.to_csv(f, sep='\t')
+    return dumper.represent_scalar('!DataFrame', str(path))
+
+
+@dfd_register(np.ndarray)
+def represent_numpy(dumper: DataFileDumper, array: np.ndarray) -> yaml.ScalarNode:
+    path = dumper.path / f'{id(array)}.npy'
+    with open(path, 'wb') as f:
+        np.save(f, array)
+    return dumper.represent_scalar('!ndarray', str(path))
+
+
+@dfd_register(CommentedDefaultMap)
+def represent_commented_default_map(dumper: DataFileDumper, cdm: CommentedDefaultMap) -> yaml.ScalarNode:
+    path = dumper.path / f'{id(cdm)}.yml'
+    with open(path, 'w') as f:
+        yaml.dump(cdm, f, Dumper=RoundTripDumper)
+    return dumper.represent_scalar('!parameters', str(path))
+
+
+class DataFileLoader(yaml.Loader):
+    bidict_cache = {}
+
+
+def dfl_register(t: str) -> Callable:
+    def proxy(func: Callable) -> Callable:
+        DataFileLoader.add_constructor(t, func)
+        return func
+
+    return proxy
+
+
+@dfl_register('!bidict')
+@zip_load_register('!bidict')
+def construct_bidict(loader: [DataFileLoader, ZipLoader], node: yaml.MappingNode) -> bidict:
+    mapping = loader.construct_mapping(node, deep=True)
+    dct, inverse = mapping['dict'], mapping['inverse']
+    bdct = loader.bidict_cache.get(id(dct))
+    if bdct is None:
+        bdct = bidict(dct)
+        loader.bidict_cache[id(dct)] = bdct
+    return bdct.inverse if inverse else bdct
+
+
+@dfl_register('!DataFrame')
+def construct_pandas(loader: DataFileLoader, node: yaml.ScalarNode) -> pandas.DataFrame:
+    with open(Path(loader.stream.name).with_suffix('') / node.value, 'r') as f:
+        return pandas.read_table(f, index_col=0)
+
+
+@dfl_register('!ndarray')
+def construct_numpy(loader: DataFileLoader, node: yaml.ScalarNode) -> np.ndarray:
+    with open(Path(loader.stream.name).with_suffix('') / node.value, 'rb') as f:
+        return np.load(f)
+
+
+@dfl_register('!parameters')
+def construct_commented_default_map(loader: DataFileLoader, node: yaml.ScalarNode) -> CommentedDefaultMap:
+    with open(Path(loader.stream.name).with_suffix('') / node.value, 'r') as f:
+        return yaml.load(f, Loader=RoundTripLoader)

@@ -200,9 +200,9 @@ def findcells(im, imnuc=None, cellcolormask=None, ccdist=None, threshold=None, t
         else:
             return skimage.morphology.binary_erosion(mask, disk(-dilate)), LA
     
-    im = im.astype('float')
+    im = np.asarray(im).astype('float')
     if imnuc is not None:
-        imnuc = imnuc.astype('float')
+        imnuc = np.asarray(imnuc).astype('float')
         
     if ccdist is None:  # try to determine good ccdist if not given
         if imnuc is None:

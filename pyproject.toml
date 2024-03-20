@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "tllab_common"
-version = "2024.3.2"
+version = "2024.3.3"
 description = "Common code for the Lenstra lab."
 authors = ["Lenstra lab NKI <t.lenstra@nki.nl>"]
 license = "GPLv3"

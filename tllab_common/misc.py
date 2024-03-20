@@ -449,6 +449,7 @@ def df_join(h: pandas.DataFrame) -> pandas.DataFrame:
         else:
             df = df.join(g.droplevel(0), lsuffix=f'_{j:.0f}')
         j = i
+    return df
 
 
 color = Color()
