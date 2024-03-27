@@ -227,9 +227,16 @@ def get_params(parameter_file: [str, Path], template_file: [str, Path] = None,
             cprint(f'<Loading more parameters from <{more_parameters_file}:.b>:g>')
             more_parameters = yaml_load(more_parameters_file)
             more_params(more_parameters, file)
-            for k, v in more_parameters.items():
-                if k not in parameters:
-                    parameters[k] = v
+
+            def add_items(sub_params, item):
+                for k, v in item.items():
+                    if k not in sub_params:
+                        sub_params[k] = v
+                    elif isinstance(v, dict):
+                        add_items(sub_params[k], v)
+
+            add_items(parameters, more_parameters)
+
 
     def check_params(parameters: dict, template: dict, path: str = '') -> None:
         """ recursively check parameters and add defaults """

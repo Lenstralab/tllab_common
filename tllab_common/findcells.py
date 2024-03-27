@@ -156,7 +156,7 @@ def fill_holes(im):
 def findcells(im, imnuc=None, cellcolormask=None, ccdist=None, threshold=None, thresholdnuc=None, thres=1, thresnuc=1,
               smooth=2.5, smoothnuc=2.5, minfeatsize=5, minfeatsizenuc=5, dilate=5, dilatenuc=5, removeborders=True,
               **kwargs):
-    """ segement cells and nuclei from an image (nxm array)
+    """ segment cells and nuclei from an image (nxm array)
         wp@tl20190710
 
         im: 2d numpy array with an image
@@ -215,7 +215,7 @@ def findcells(im, imnuc=None, cellcolormask=None, ccdist=None, threshold=None, t
     
     if imnuc is None:  # only one channel
         mask, LA = make_mask(im, threshold, thres, smooth, minfeatsize, dilate)
-        pk = skimage.feature.peak_local_max(fill_nan(LA), footprint=disk(ccdist), exclude_border=False)
+        pk = skimage.feature.peak_local_max(fill_nan(LA), min_distance=ccdist, exclude_border=False)
         pk = maskpk(pk, mask)
         pk = np.array(sorted([q.tolist() for q in pk])[::-1])
         markers = np.zeros(im.shape, int)

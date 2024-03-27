@@ -1,7 +1,7 @@
 from abc import ABCMeta, abstractmethod
 from functools import cached_property
 from numbers import Number
-from typing import Callable, Tuple
+from typing import Callable, Optional, Sequence, Tuple
 
 import numpy as np
 from numpy import typing as npt
@@ -12,15 +12,21 @@ from scipy.optimize import OptimizeResult, minimize
 class Fit(metaclass=ABCMeta):
     bounds = None
 
-    def __init__(self, x: npt.ArrayLike, y: npt.ArrayLike, w: [npt.ArrayLike, None] = None,
-                 log_scale: bool = False):
+    def __init__(self, x: npt.ArrayLike, y: npt.ArrayLike,
+                 w: [npt.ArrayLike, None] = None, s: [npt.ArrayLike, None] = None,
+                 fit_window: Optional[Sequence[float]] = None, log_scale: bool = False):
         x = np.asarray(x)
         y = np.asarray(y)
-        if w is None:
-            w = np.ones_like(x)
-        else:
-            w = np.asarray(w)
-        self.x, self.y, self.w = nonnan(x, y, w)
+        w = np.ones_like(x) if w is None else np.asarray(w)
+        s = np.ones_like(x) if s is None else np.asarray(s)
+
+        if fit_window:
+            idx = (fit_window[0] <= x) & (x < fit_window[1])
+            x, y, w, s = x[idx], y[idx], w[idx], s[idx]
+
+        if log_scale:
+            s[s == 0] = 1e-16
+        self.x, self.y, self.w, self.s = nonnan(x, y, w, s)
         self.log_scale = log_scale
         self.n = np.sum(self.w)
         self.p_ci95 = None
@@ -76,10 +82,10 @@ class Fit(metaclass=ABCMeta):
     def get_cost_fun(self) -> Callable:
         if self.log_scale:
             def cost(p: npt.ArrayLike) -> npt.ArrayLike:
-                return np.nansum(np.abs(self.w * np.log(self.y / self.fun(p, self.x)) ** 2))
+                return np.nansum(np.abs(self.w / np.log(self.s) * np.log(self.y / self.fun(p, self.x)) ** 2))
         else:
             def cost(p: npt.ArrayLike) -> npt.ArrayLike:
-                return np.nansum(np.abs(self.w * (self.y - self.fun(p, self.x)) ** 2))
+                return np.nansum(np.abs(self.w / self.s * (self.y - self.fun(p, self.x)) ** 2))
         return cost
 
     def fit(self):
@@ -94,10 +100,12 @@ class Fit(metaclass=ABCMeta):
             r = OptimizeResult(fun=np.nan, message='Empty data', nfev=0, nit=0, status=1, success=False,
                                x=np.full(self.n_p, np.nan))
         if self.log_scale:
-            self.chi_squared, self.p_ci95, self.r_squared = fminerr(lambda p, x: np.log(self.fun(p, x)),
-                                                                    r.x, np.log(self.y), (self.x,), self.w)
+            self.chi_squared, self.p_ci95, self.r_squared = fminerr(lambda p, x: np.log(self.fun(p, x)), r.x,
+                                                                    np.log(self.y), (self.x,),
+                                                                    self.w, np.log(self.s))
         else:
-            self.chi_squared, self.p_ci95, self.r_squared = fminerr(self.fun, r.x, self.y, (self.x,), self.w)
+            self.chi_squared, self.p_ci95, self.r_squared = fminerr(self.fun, r.x,
+                                                                    self.y, (self.x,), self.w, self.s)
         self.r_squared_adjusted = 1 - (1 - self.r_squared) * (self.n - 1) / (len(r.x) - 1)
         return r
 
@@ -221,7 +229,6 @@ class GammaCDF(Fit):
         return 1 - special.gammainc(p[0], x / p[1])
 
 
-
 def finite(*args):
     idx = np.prod([np.isfinite(arg) for arg in args], 0).astype(bool)
     return [arg[idx] for arg in args]
@@ -232,7 +239,7 @@ def nonnan(*args):
     return [arg[idx] for arg in args]
 
 
-def fminerr(fun, a, y, args=(), w=None, diffstep=1e-6):
+def fminerr(fun, a, y, args=(), w=None, s=None, diffstep=1e-6):
     """ Error estimation of a fit
 
         Inputs:
@@ -260,14 +267,13 @@ def fminerr(fun, a, y, args=(), w=None, diffstep=1e-6):
     eps = np.spacing(1)
     a = np.array(a).flatten()
     y = np.array(y).flatten()
-    if w is None:
-        w = np.ones(np.shape(y))
-    else:
-        w = np.array(w).flatten()
+    w = np.ones_like(y) if w is None else np.asarray(w).flatten()
+    s = np.ones_like(y) if s is None else np.asarray(s).flatten()
+
     n_data = np.size(y)
     n_par = np.size(a)
     f0 = np.array(fun(a, *args)).flatten()
-    chisq = np.sum(((f0 - y) * w) ** 2) / (n_data - n_par)
+    chisq = np.sum(((f0 - y) * w / s) ** 2) / (n_data - n_par)
 
     # calculate R^2
     sstot = np.sum((y - np.nanmean(y)) ** 2)
@@ -280,7 +286,7 @@ def fminerr(fun, a, y, args=(), w=None, diffstep=1e-6):
         ah = a.copy()
         ah[i] = a[i] * (1 + diffstep) + eps
         f = np.array(fun(ah, *args)).flatten()
-        deriv[:, i] = (f - f0) / (ah[i] - a[i]) * w
+        deriv[:, i] = (f - f0) / (ah[i] - a[i]) * w / s
 
     hesse = np.matmul(deriv.T, deriv)
 
