@@ -1,11 +1,11 @@
 import pickle
+import shutil
 import zipfile
 from contextlib import ExitStack
 from functools import wraps
 from io import BytesIO, StringIO
 from pathlib import Path
-from typing import Any, Callable, Hashable, Iterator, IO, Optional, Sequence, Type
-import shutil
+from typing import IO, Any, Callable, Hashable, Iterator, Optional, Sequence, Type
 
 import dill
 import numpy as np

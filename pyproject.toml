@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "tllab_common"
-version = "2024.3.4"
+version = "2024.4.0"
 description = "Common code for the Lenstra lab."
 authors = ["Lenstra lab NKI <t.lenstra@nki.nl>"]
 license = "GPLv3"
@@ -30,12 +30,15 @@ bidict = "*"
 pytest-xdist = { version = "*", optional = true }
 
 [tool.poetry.extras]
-test = ["pytest-xdist"]
+test = ["pytest"]
 transforms = ["SimpleITK-SimpleElastix"]
 bioformats = ["python-javabridge", "python-bioformats"]
 
 [tool.poetry.scripts]
 wimread = "tllab_common.wimread:main"
+
+[tool.isort]
+line_length = 119
 
 [build-system]
 requires = ["poetry-core"]

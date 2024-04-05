@@ -6,18 +6,19 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from glob import glob
-from numbers import Number
 from pathlib import Path
 from traceback import format_exc, print_exception
-from typing import Sequence
+from typing import Any, Hashable, Sequence
 
 import numpy as np
 import pandas
 import regex
-from ruamel import yaml
 from IPython import embed
+from ruamel import yaml
 
-from .io import pickle_dump, get_params, yaml_load
+from .io import get_params, pickle_dump, yaml_load
+
+Number = int | float | complex
 
 
 class Struct(dict):
@@ -450,6 +451,14 @@ def df_join(h: pandas.DataFrame) -> pandas.DataFrame:
             df = df.join(g.droplevel(0), lsuffix=f'_{j:.0f}')
         j = i
     return df
+
+
+def add_extra_parameters(parameters: dict[Hashable, Any], extra_parameters: dict[Hashable, Any]) -> None:
+    for key, value in extra_parameters.items():
+        if isinstance(value, dict):
+            add_extra_parameters(parameters[key], value)
+        else:
+            parameters[key] = value
 
 
 color = Color()

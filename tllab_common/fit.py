@@ -1,31 +1,35 @@
+from __future__ import annotations
+
 from abc import ABCMeta, abstractmethod
 from functools import cached_property
-from numbers import Number
-from typing import Callable, Optional, Sequence, Tuple
+from typing import Any, Callable, Sequence
 
 import numpy as np
-from numpy import typing as npt
+from numpy.typing import ArrayLike
 from scipy import special, stats
 from scipy.optimize import OptimizeResult, minimize
+
+Number = int | float | complex
 
 
 class Fit(metaclass=ABCMeta):
     bounds = None
 
-    def __init__(self, x: npt.ArrayLike, y: npt.ArrayLike,
-                 w: [npt.ArrayLike, None] = None, s: [npt.ArrayLike, None] = None,
-                 fit_window: Optional[Sequence[float]] = None, log_scale: bool = False):
+    def __init__(self, x: ArrayLike, y: ArrayLike,
+                 w: [ArrayLike, None] = None, s: [ArrayLike, None] = None,
+                 fit_window: Sequence[float] = None, log_scale: bool = False) -> None:
         x = np.asarray(x)
         y = np.asarray(y)
         w = np.ones_like(x) if w is None else np.asarray(w)
-        s = np.ones_like(x) if s is None else np.asarray(s)
+        if log_scale:
+            s = np.ones_like(x) if s is None else np.asarray(s) / np.abs(y)
+        else:
+            s = np.ones_like(x) if s is None else np.asarray(s)
 
         if fit_window:
             idx = (fit_window[0] <= x) & (x < fit_window[1])
             x, y, w, s = x[idx], y[idx], w[idx], s[idx]
 
-        if log_scale:
-            s[s == 0] = 1e-16
         self.x, self.y, self.w, self.s = nonnan(x, y, w, s)
         self.log_scale = log_scale
         self.n = np.sum(self.w)
@@ -36,20 +40,20 @@ class Fit(metaclass=ABCMeta):
 
     @property
     @abstractmethod
-    def n_p(self) -> Number:
+    def n_p(self) -> int:
         pass
 
     @property
     @abstractmethod
-    def p0(self) -> npt.ArrayLike:
+    def p0(self) -> ArrayLike:
         pass
 
     @staticmethod
     @abstractmethod
-    def fun(p: npt.ArrayLike, x: npt.ArrayLike) -> npt.ArrayLike:
+    def fun(p: ArrayLike, x: Number | ArrayLike) -> ArrayLike:
         pass
 
-    def dfun(self, p: npt.ArrayLike, x: npt.ArrayLike, diffstep: float = 1e-6) -> np.ndarray:
+    def dfun(self, p: ArrayLike, x: ArrayLike, diffstep: float = 1e-6) -> np.ndarray:
         """ d fun / dp_i for each p_i in p, this default function will calculate it numerically """
         eps = np.spacing(1)
         deriv = np.zeros((len(p), len(x)))
@@ -62,15 +66,14 @@ class Fit(metaclass=ABCMeta):
             deriv[i] = (f - f0) / (ph[i] - p[i])
         return deriv
 
-    def evaluate(self, x: [Number, npt.ArrayLike, None] = None) -> Tuple[npt.ArrayLike, npt.ArrayLike]:
+    def evaluate(self, x: Number | ArrayLike = None) -> tuple[ArrayLike, ArrayLike]:
         if x is None:
             x = np.linspace(np.nanmin(self.x), np.nanmax(self.x))
         else:
             x = np.asarray(x)
         return x.real, self.fun(self.p, x)
 
-    def evaluate_ci(self, x: [Number, npt.ArrayLike, None] = None) \
-            -> Tuple[npt.ArrayLike, npt.ArrayLike, npt.ArrayLike]:
+    def evaluate_ci(self, x: Number | ArrayLike = None) -> tuple[ArrayLike, ArrayLike, ArrayLike]:
         if x is None:
             x = np.linspace(np.nanmin(self.x), np.nanmax(self.x))
         else:
@@ -79,23 +82,23 @@ class Fit(metaclass=ABCMeta):
         df = np.sqrt(np.sum((self.dfun(self.p, x).T * self.p_ci95).T ** 2, 0))
         return x.real, f - df, f + df
 
-    def get_cost_fun(self) -> Callable:
+    def get_cost_fun(self) -> Callable[[ArrayLike], float]:
         if self.log_scale:
-            def cost(p: npt.ArrayLike) -> npt.ArrayLike:
-                return np.nansum(np.abs(self.w / np.log(self.s) * np.log(self.y / self.fun(p, self.x)) ** 2))
+            def cost(p: ArrayLike) -> float:
+                return np.nansum(np.abs(self.w / self.s * np.log(self.y / self.fun(p, self.x)) ** 2))
         else:
-            def cost(p: npt.ArrayLike) -> npt.ArrayLike:
+            def cost(p: ArrayLike) -> float:
                 return np.nansum(np.abs(self.w / self.s * (self.y - self.fun(p, self.x)) ** 2))
         return cost
 
-    def fit(self):
+    def fit(self) -> Fit:
         _ = self.r
         return self
 
     @cached_property
     def r(self) -> OptimizeResult:
         if len(self.x):
-            r = minimize(self.get_cost_fun(), self.p0, method='Nelder-Mead', bounds=self.bounds)
+            r = minimize(self.get_cost_fun(), np.asarray(self.p0), method='Nelder-Mead', bounds=self.bounds)
         else:
             r = OptimizeResult(fun=np.nan, message='Empty data', nfev=0, nit=0, status=1, success=False,
                                x=np.full(self.n_p, np.nan))
@@ -110,19 +113,19 @@ class Fit(metaclass=ABCMeta):
         return r
 
     @property
-    def p(self) -> npt.ArrayLike:
+    def p(self) -> np.ndarray:
         return np.full(self.n_p, np.nan) if self.r is None else self.r.x
 
     @property
-    def log_likelihood(self) -> Number:
+    def log_likelihood(self) -> float:
         return -self.n * np.log(2 * np.pi * self.r.fun / (self.n - 1)) / 2 - (self.n - 1) / 2
 
     @property
-    def bic(self) -> Number:
+    def bic(self) -> float:
         """ Bayesian Information Criterion: the fit with the smallest bic should be the best fit """
         return self.n_p * np.log(self.n) - 2 * self.log_likelihood
 
-    def ftest(self, fit2) -> Number:
+    def ftest(self, fit2) -> float:
         """ returns the p-value for the hypothesis that fit2 is the better fit,
             assuming fit2 is the fit with more free parameters
             if the fits are swapped the p-value will be negative """
@@ -150,7 +153,7 @@ class Exponential1(Fit):
     bounds = ((0, None), (0, None))
 
     @property
-    def p0(self):
+    def p0(self) -> ArrayLike:
         """ y = a*exp(-t/tau)
             return a, tau
         """
@@ -162,7 +165,7 @@ class Exponential1(Fit):
             return [np.clip(value.real, *bound) for value, bound in zip((np.exp(q[1]), -1 / q[0]), self.bounds)]
 
     @staticmethod
-    def fun(p, x):
+    def fun(p: ArrayLike, x: Number | ArrayLike) -> ArrayLike:
         return p[0] * np.exp(-x / p[1])
 
     # def dfun(self, p, x, diffstep=None):
@@ -175,7 +178,7 @@ class Exponential2(Fit):
     bounds = ((0, None), (0, 1), (0, None), (0, None))
 
     @property
-    def p0(self):
+    def p0(self) -> ArrayLike:
         """ y = A(a*exp(-t/tau_0) + (1-a)*exp(-t/tau_1)
             return A, a, tau_0, tau_1
         """
@@ -186,7 +189,7 @@ class Exponential2(Fit):
                 for value, bound in zip((y0, 1 - q[0], q[1] / 3, q[1]), self.bounds)]
 
     @staticmethod
-    def fun(p, x):
+    def fun(p: ArrayLike, x: Number | ArrayLike) -> ArrayLike:
         return p[0] * (p[1] * np.exp(-x / p[2]) + (1 - p[1]) * np.exp(-x / p[3]))
 
     # def dfun(self, p, x, diffstep=None):
@@ -200,7 +203,7 @@ class Powerlaw(Fit):
     n_p = 2
 
     @property
-    def p0(self):
+    def p0(self) -> ArrayLike:
         """ y = (x/tau)^alpha
             return alpha, tau
         """
@@ -208,7 +211,7 @@ class Powerlaw(Fit):
         return q[0].real, np.exp(-q[1] / q[0]).real
 
     @staticmethod
-    def fun(p, x):
+    def fun(p: ArrayLike, x: Number | ArrayLike) -> ArrayLike:
         return ((np.asarray(x).astype('complex') / p[1]) ** p[0]).real
 
 
@@ -216,7 +219,7 @@ class GammaCDF(Fit):
     n_p = 2
 
     @property
-    def p0(self):
+    def p0(self) -> ArrayLike:
         """ y = γ(k, x / θ) / Γ(k)
         """
         m = np.sum(-self.x[1:] * np.diff(self.y))
@@ -224,22 +227,24 @@ class GammaCDF(Fit):
         return m ** 2 / v, v / m  # A, k, theta
 
     @staticmethod
-    def fun(p, x):
+    def fun(p: ArrayLike, x: Number | ArrayLike) -> ArrayLike:
         """ p: k, theta """
         return 1 - special.gammainc(p[0], x / p[1])
 
 
-def finite(*args):
+def finite(*args: ArrayLike) -> list[np.ndarray]:
     idx = np.prod([np.isfinite(arg) for arg in args], 0).astype(bool)
-    return [arg[idx] for arg in args]
+    return [np.asarray(arg)[idx] for arg in args]
 
 
-def nonnan(*args):
+def nonnan(*args: ArrayLike) -> list[np.ndarray]:
     idx = np.prod([~np.isnan(arg) for arg in args], 0).astype(bool)
-    return [arg[idx] for arg in args]
+    return [np.asarray(arg)[idx] for arg in args]
 
 
-def fminerr(fun, a, y, args=(), w=None, s=None, diffstep=1e-6):
+def fminerr(fun: Callable[[ArrayLike, Any], float], a: ArrayLike, y: ArrayLike,
+            args: tuple[Any] = (), w: ArrayLike = None, s: ArrayLike = None,
+            diffstep: float = 1e-6) -> tuple[float, np.ndarray, float]:
     """ Error estimation of a fit
 
         Inputs:
