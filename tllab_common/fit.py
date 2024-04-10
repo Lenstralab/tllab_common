@@ -179,7 +179,7 @@ class Exponential2(Fit):
 
     @property
     def p0(self) -> ArrayLike:
-        """ y = A(a*exp(-t/tau_0) + (1-a)*exp(-t/tau_1)
+        """ y = A(a*exp(-t/tau_0) + (1-a)*exp(-t/tau_1))
             return A, a, tau_0, tau_1
         """
         n = len(self.x) // 2
@@ -197,6 +197,27 @@ class Exponential2(Fit):
     #     e1 = np.exp(-x / p[3])
     #     return np.vstack((p[1] * e0 + (1 - p[1]) * e1, p[0] * (e0 - e1),
     #                       p[0] * p[1] * e0 / p[2] ** 2, p[0] * (1 - p[1]) * e1 / p[3] ** 2))
+
+
+class Exponential3(Fit):
+    n_p = 6
+    bounds = ((0, None), (0, 1), (0, 1), (0, None), (0, None), (0, None))
+
+    @property
+    def p0(self) -> ArrayLike:
+        """ y = A(a*exp(-t/tau_0) + b*exp(-t/tau_1) + (1-a-b)*exp(-t/tau-2))
+            return A, a, b, tau_0, tau_1, tau_2
+        """
+        n = len(self.x) // 2
+        y0 = np.nanmax(self.y)
+        q = Exponential2(self.x[n:], self.y[n:] / y0).p0
+        return [np.clip(value, *bound)
+                for value, bound in zip((y0, 0.3, 0.3, q[2] / 3, q[3] / 3, q[3]), self.bounds)]
+
+    @staticmethod
+    def fun(p: ArrayLike, x: Number | ArrayLike) -> ArrayLike:
+        return p[0] * (p[1] * np.exp(-x / p[3]) + p[2] * np.exp(-x / p[4]) +
+                       (1 - p[1] - p[2]) * np.exp(-x / p[5]))
 
 
 class Powerlaw(Fit):
@@ -275,31 +296,34 @@ def fminerr(fun: Callable[[ArrayLike, Any], float], a: ArrayLike, y: ArrayLike,
     w = np.ones_like(y) if w is None else np.asarray(w).flatten()
     s = np.ones_like(y) if s is None else np.asarray(s).flatten()
 
-    n_data = np.size(y)
-    n_par = np.size(a)
-    f0 = np.array(fun(a, *args)).flatten()
-    chisq = np.sum(((f0 - y) * w / s) ** 2) / (n_data - n_par)
+    if len(y):
+        n_data = np.size(y)
+        n_par = np.size(a)
+        f0 = np.array(fun(a, *args)).flatten()
+        chisq = np.sum(((f0 - y) * w / s) ** 2) / (n_data - n_par)
 
-    # calculate R^2
-    sstot = np.sum((y - np.nanmean(y)) ** 2)
-    ssres = np.sum((y - f0) ** 2)
-    r_squared = 1 - ssres / sstot
+        # calculate R^2
+        sstot = np.sum((y - np.nanmean(y)) ** 2)
+        ssres = np.sum((y - f0) ** 2)
+        r_squared = 1 - ssres / sstot
 
-    # calculate derivatives
-    deriv = np.zeros((n_data, n_par), dtype='complex')
-    for i in range(n_par):
-        ah = a.copy()
-        ah[i] = a[i] * (1 + diffstep) + eps
-        f = np.array(fun(ah, *args)).flatten()
-        deriv[:, i] = (f - f0) / (ah[i] - a[i]) * w / s
+        # calculate derivatives
+        deriv = np.zeros((n_data, n_par), dtype='complex')
+        for i in range(n_par):
+            ah = a.copy()
+            ah[i] = a[i] * (1 + diffstep) + eps
+            f = np.array(fun(ah, *args)).flatten()
+            deriv[:, i] = (f - f0) / (ah[i] - a[i]) * w / s
 
-    hesse = np.matmul(deriv.T, deriv)
+        hesse = np.matmul(deriv.T, deriv)
 
-    try:
-        if np.linalg.matrix_rank(hesse) == np.shape(hesse)[0]:
-            da = np.sqrt(chisq * np.diag(np.linalg.inv(hesse)))
-        else:
-            da = np.sqrt(chisq * np.diag(np.linalg.pinv(hesse)))
-    except (Exception,):
-        da = np.full_like(a, np.nan)
-    return chisq.real, 1.96 * da.real, r_squared.real
+        try:
+            if np.linalg.matrix_rank(hesse) == np.shape(hesse)[0]:
+                da = np.sqrt(chisq * np.diag(np.linalg.inv(hesse)))
+            else:
+                da = np.sqrt(chisq * np.diag(np.linalg.pinv(hesse)))
+        except (Exception,):
+            da = np.full_like(a, np.nan)
+        return chisq.real, 1.96 * da.real, r_squared.real
+    else:
+        return np.nan, np.full_like(a, np.nan), np.nan

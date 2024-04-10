@@ -6,14 +6,16 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from glob import glob
+from inspect import signature, Parameter
 from pathlib import Path
 from traceback import format_exc, print_exception
-from typing import Any, Hashable, Sequence
+from typing import Any, Callable, Hashable, Sequence, TypeVar
 
 import numpy as np
 import pandas
 import regex
 from IPython import embed
+from makefun import wraps
 from ruamel import yaml
 
 from .io import get_params, pickle_dump, yaml_load
@@ -77,8 +79,7 @@ class Struct(dict):
             self[key] = value
 
 
-dumper = yaml.SafeDumper
-dumper.add_representer(Struct, dumper.represent_dict)
+yaml.RoundTripRepresenter.add_representer(Struct, yaml.RoundTripRepresenter.represent_dict)
 
 
 @dataclass
@@ -459,6 +460,86 @@ def add_extra_parameters(parameters: dict[Hashable, Any], extra_parameters: dict
             add_extra_parameters(parameters[key], value)
         else:
             parameters[key] = value
+
+
+R = TypeVar('R')
+
+
+def wraps_combine(wrapper: Callable[[Any, ...], Any]) -> Callable[[Any, ...], R]:
+    """ decorator to combine arguments and doc strings of wrapped and wrapper functions,
+        *args and/or **kwargs in wrapped will be replaced by the arguments from wrapper,
+        duplicate arguments will be left in place in wrapped
+
+        example:
+
+        def wrapper(a, b, c, **kwargs):
+            return a + b + c
+
+        @wraps_combine(wrapper)
+        def wrapped(a, d, e=45, *args, f=5, **kwargs):
+            return d * e * wrapper(*args, **kwargs)
+
+        signature: wrapped(a, d, e, b, c, *, f=5, **kwargs)
+    """
+
+    def wrap(wrapped: Callable[[Any, ...], R]) -> Callable[[Any, ...], R]:
+        if isinstance(wrapper, type):
+            sig_wrapper = signature(wrapper.__init__)
+        else:
+            sig_wrapper = signature(wrapper)
+        sig_wrapped = signature(wrapped)
+        p1, n1, k1 = zip(*[(p, p.name, p.kind) for p in sig_wrapped.parameters.values()])
+        p0, n0, k0 = zip(*[(p, p.name, p.kind) for p in sig_wrapper.parameters.values()
+                           if p.kind in (Parameter.VAR_POSITIONAL, Parameter.VAR_KEYWORD) or p.name not in n1])
+
+        idx0a = k0.index(Parameter.VAR_POSITIONAL) if Parameter.VAR_POSITIONAL in k0 else None
+        idx0k = k0.index(Parameter.VAR_KEYWORD) if Parameter.VAR_KEYWORD in k0 else None
+        idx1a = k1.index(Parameter.VAR_POSITIONAL) if Parameter.VAR_POSITIONAL in k1 else None
+        idx1k = k1.index(Parameter.VAR_KEYWORD) if Parameter.VAR_KEYWORD in k1 else None
+
+        if idx1a is not None:
+            if idx0a:
+                new_parameters = [Parameter(p.name, p.kind, annotation=p.annotation) for p in p1[:idx1a]]
+            else:
+                new_parameters = list(p1[:idx1a])
+            if new_parameters[-1].default == Parameter.empty:
+                new_parameters.extend(p0[:idx0k])
+            else:
+                new_parameters.extend([Parameter(p.name, p.kind,
+                                                 default='empty' if p.default == Parameter.empty else p.default,
+                                                 annotation=p.annotation)
+                                       for p in p0[:idx0k]])
+            new_parameters.extend(p1[idx1a + 1:idx1k])
+        elif idx1k is not None:
+            if idx0a is not None:
+                new_parameters = list(p1[:idx1k])
+            else:
+                new_parameters = [Parameter(p.name, p.kind, annotation=p.annotation) for p in p1[:idx1k]]
+            new_parameters.extend([Parameter(p.name, Parameter.KEYWORD_ONLY,
+                                             default='empty' if p.default == Parameter.empty else p.default,
+                                             annotation=p.annotation)
+                                  for p in p0[:(idx0k if idx0a is None else idx0a)]])
+        else:
+            raise ValueError(f'No *args or **kwargs in {wrapped.__name__}{sig_wrapped}')
+        if idx0k is not None:
+            new_parameters.append(p0[idx0k])
+
+        if wrapped.__doc__ and wrapper.__doc__:
+            doc = f"{wrapped.__doc__}\n\ninherited from:\n\n{wrapper.__doc__.lstrip(' ')}"
+        elif wrapped.__doc__:
+            doc = wrapped.__doc__
+        elif wrapper.__doc__:
+            doc = wrapper.__doc__
+        else:
+            doc = None
+
+        @wraps(wrapped, new_sig=sig_wrapper.replace(parameters=new_parameters), doc=doc)
+        def fun(*args: Any, **kwargs: Any) -> R:
+            return wrapped(*args, **kwargs)
+
+        return fun
+
+    return wrap  # type: ignore
 
 
 color = Color()

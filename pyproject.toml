@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "tllab_common"
-version = "2024.4.0"
+version = "2024.4.1"
 description = "Common code for the Lenstra lab."
 authors = ["Lenstra lab NKI <t.lenstra@nki.nl>"]
 license = "GPLv3"
@@ -18,7 +18,7 @@ numpy = "*"
 tqdm = "*"
 tifffile = "*"
 czifile = "*"
-"ruamel.yaml" = "^0.17"
+"ruamel.yaml" = "*"
 dill = "*"
 colorcet = "*"
 scipy = "*"
@@ -27,6 +27,7 @@ roifile = "*"
 ipython = "*"
 regex = "*"
 bidict = "*"
+makefun = "*"
 pytest-xdist = { version = "*", optional = true }
 
 [tool.poetry.extras]
