@@ -132,7 +132,7 @@ def yaml_dump(data: Any, stream: Optional[IO] = None) -> Optional[str]:
 
 
 def get_params(parameter_file: [str, Path], template_file: [str, Path] = None,
-               required: dict = None) -> CommentedDefaultMap:
+               required: Sequence[dict] = None) -> CommentedDefaultMap:
     """ Load parameters from a parameterfile and parameters missing from that from the templatefile. Raise an error when
         parameters in required are missing. Return a dictionary with the parameters.
     """
@@ -169,7 +169,7 @@ def get_params(parameter_file: [str, Path], template_file: [str, Path] = None,
             elif isinstance(value, dict):
                 check_params(parameters[key], value, f'{path}{key}.')
 
-    def check_required(parameters: dict, required: dict) -> None:  # noqa
+    def check_required(parameters: dict, required: Sequence[dict]) -> None:  # noqa
         if required is not None:
             for p in required:
                 if isinstance(p, dict):

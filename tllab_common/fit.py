@@ -17,7 +17,7 @@ class Fit(metaclass=ABCMeta):
 
     def __init__(self, x: ArrayLike, y: ArrayLike,
                  w: [ArrayLike, None] = None, s: [ArrayLike, None] = None,
-                 fit_window: Sequence[float] = None, log_scale: bool = False) -> None:
+                 fit_window: Sequence[float] = None, log_scale: bool = False, fit_s: bool = True) -> None:
         x = np.asarray(x)
         y = np.asarray(y)
         w = np.ones_like(x) if w is None else np.asarray(w)
@@ -32,6 +32,7 @@ class Fit(metaclass=ABCMeta):
 
         self.x, self.y, self.w, self.s = nonnan(x, y, w, s)
         self.log_scale = log_scale
+        self.fit_s = fit_s
         self.n = np.sum(self.w)
         self.p_ci95 = None
         self.r_squared = None
@@ -83,12 +84,13 @@ class Fit(metaclass=ABCMeta):
         return x.real, f - df, f + df
 
     def get_cost_fun(self) -> Callable[[ArrayLike], float]:
+        s = self.s if self.fit_s else 1
         if self.log_scale:
             def cost(p: ArrayLike) -> float:
-                return np.nansum(np.abs(self.w / self.s * np.log(self.y / self.fun(p, self.x)) ** 2))
+                return np.nansum(np.abs(self.w / s * np.log(self.y / self.fun(p, self.x)) ** 2))
         else:
             def cost(p: ArrayLike) -> float:
-                return np.nansum(np.abs(self.w / self.s * (self.y - self.fun(p, self.x)) ** 2))
+                return np.nansum(np.abs(self.w / s * (self.y - self.fun(p, self.x)) ** 2))
         return cost
 
     def fit(self) -> Fit:
@@ -112,9 +114,13 @@ class Fit(metaclass=ABCMeta):
         self.r_squared_adjusted = 1 - (1 - self.r_squared) * (self.n - 1) / (len(r.x) - 1)
         return r
 
+    @staticmethod
+    def sort(p: np.ndarray) -> np.ndarray:
+        return p
+
     @property
     def p(self) -> np.ndarray:
-        return np.full(self.n_p, np.nan) if self.r is None else self.r.x
+        return np.full(self.n_p, np.nan) if self.r is None else self.sort(self.r.x)
 
     @property
     def log_likelihood(self) -> float:
