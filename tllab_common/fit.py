@@ -111,7 +111,10 @@ class Fit(metaclass=ABCMeta):
         else:
             self.chi_squared, self.p_ci95, self.r_squared = fminerr(self.fun, r.x,
                                                                     self.y, (self.x,), self.w, self.s)
-        self.r_squared_adjusted = 1 - (1 - self.r_squared) * (self.n - 1) / (len(r.x) - 1)
+        if self.n - self.n_p - 1 > 0:
+            self.r_squared_adjusted = 1 - (1 - self.r_squared) * (self.n - 1) / (self.n - self.n_p - 1)
+        else:
+            self.r_squared_adjusted = np.nan
         return r
 
     @staticmethod
@@ -302,9 +305,10 @@ def fminerr(fun: Callable[[ArrayLike, Any], float], a: ArrayLike, y: ArrayLike,
     w = np.ones_like(y) if w is None else np.asarray(w).flatten()
     s = np.ones_like(y) if s is None else np.asarray(s).flatten()
 
-    if len(y):
-        n_data = np.size(y)
-        n_par = np.size(a)
+    n_data = np.size(y)
+    n_par = np.size(a)
+
+    if n_data > n_par:
         f0 = np.array(fun(a, *args)).flatten()
         chisq = np.sum(((f0 - y) * w / s) ** 2) / (n_data - n_par)
 

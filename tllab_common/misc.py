@@ -465,7 +465,7 @@ def add_extra_parameters(parameters: dict[Hashable, Any], extra_parameters: dict
 R = TypeVar('R')
 
 
-def wraps_combine(wrapper: Callable[[Any, ...], Any]) -> Callable[[Any, ...], R]:
+def wraps_combine(wrapper: Callable[[Any, ...], Any] | type) -> Callable[[Any, ...], R]:
     """ decorator to combine arguments and doc strings of wrapped and wrapper functions,
         *args and/or **kwargs in wrapped will be replaced by the arguments from wrapper,
         duplicate arguments will be left in place in wrapped
