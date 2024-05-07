@@ -1,21 +1,23 @@
 import pickle
 import re
 import sys
+import warnings
 from abc import ABCMeta
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from glob import glob
+from functools import wraps
 from inspect import signature, Parameter
 from pathlib import Path
 from traceback import format_exc, print_exception
 from typing import Any, Callable, Hashable, Sequence, TypeVar
 
 import numpy as np
+import makefun
 import pandas
 import regex
 from IPython import embed
-from makefun import wraps
 from ruamel import yaml
 
 from .io import get_params, pickle_dump, yaml_load
@@ -165,6 +167,11 @@ def cprint(*args, **kwargs):
         colors: 'krgybmcw' (darker if capitalized) or terminal color codes (int up to 255)
         decorations: b: bold, u: underlined, r: swap color with background color """
     print(*(cfmt(arg) for arg in args), **kwargs)
+
+
+@wraps(warnings.warn)
+def warn(message: str, category: type = None, stacklevel: int = 1, source: Any = None) -> None:
+    warnings.warn(cfmt(f'<{message}:208>'), category, stacklevel + 1, source)
 
 
 def format_list(string: str, lst: Sequence, fmt: str = None) -> str:
@@ -533,7 +540,7 @@ def wraps_combine(wrapper: Callable[[Any, ...], Any] | type) -> Callable[[Any, .
         else:
             doc = None
 
-        @wraps(wrapped, new_sig=sig_wrapper.replace(parameters=new_parameters), doc=doc)
+        @makefun.wraps(wrapped, new_sig=sig_wrapper.replace(parameters=new_parameters), doc=doc)
         def fun(*args: Any, **kwargs: Any) -> R:
             return wrapped(*args, **kwargs)
 

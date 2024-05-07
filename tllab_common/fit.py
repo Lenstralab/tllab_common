@@ -87,7 +87,7 @@ class Fit(metaclass=ABCMeta):
         s = self.s if self.fit_s else 1
         if self.log_scale:
             def cost(p: ArrayLike) -> float:
-                return np.nansum(np.abs(self.w / s * np.log(self.y / self.fun(p, self.x)) ** 2))
+                return np.nansum(np.abs(self.w / s * (np.log(self.y) - np.log(self.fun(p, self.x))) ** 2))
         else:
             def cost(p: ArrayLike) -> float:
                 return np.nansum(np.abs(self.w / s * (self.y - self.fun(p, self.x)) ** 2))

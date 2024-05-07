@@ -3,6 +3,7 @@ from contextlib import ExitStack
 from functools import wraps
 from io import BytesIO
 from pathlib import Path
+from re import sub
 from typing import IO, Any, Callable, Hashable, Iterator, Optional, Sequence, Type
 
 import dill
@@ -116,8 +117,11 @@ def yaml_load(stream: [str, bytes, Path, IO]) -> Any:
     with ExitStack() as stack:
         y = yaml.YAML()
         y.Constructor = RoundTripConstructor
-        if isinstance(stream, (str, bytes, Path)):
-            stream = stack.enter_context(open(stream, 'r'))
+        try:
+            if isinstance(stream, (str, bytes, Path)):
+                stream = stack.enter_context(open(stream, 'r'))
+        except (FileNotFoundError, OSError):
+            pass
         return y.load(stream)
 
 
@@ -139,6 +143,13 @@ def get_params(parameter_file: [str, Path], template_file: [str, Path] = None,
 
     from .misc import cprint
 
+    parameter_file = Path(parameter_file)
+
+    def yaml_load_and_format(file: Path) -> CommentedDefaultMap:
+        with open(file) as f:
+            return yaml_load(sub(r'{{\s*(.+)\s*}}', r'{\1}', f.read()).format(
+                name=parameter_file.stem, folder=str(parameter_file.parent), suffix=parameter_file.suffix))
+
     def more_params(parameters: dict, file: [str, Path]) -> None:
         """ recursively load more parameters from another file """
         file = Path(file)
@@ -148,7 +159,7 @@ def get_params(parameter_file: [str, Path], template_file: [str, Path] = None,
             if not more_parameters_file.is_absolute():
                 more_parameters_file = Path(file).absolute().parent / more_parameters_file
             cprint(f'<Loading more parameters from <{more_parameters_file}:.b>:g>')
-            more_parameters = yaml_load(more_parameters_file)
+            more_parameters = yaml_load_and_format(more_parameters_file)
             more_params(more_parameters, file)
 
             def add_items(sub_params, item):
@@ -179,7 +190,7 @@ def get_params(parameter_file: [str, Path], template_file: [str, Path] = None,
                     if p not in parameters:
                         raise Exception(f'Parameter {p} not given in parameter file.')
 
-    params = yaml_load(parameter_file)
+    params = yaml_load_and_format(parameter_file)
     more_params(params, parameter_file)
     check_required(params, required)
 
