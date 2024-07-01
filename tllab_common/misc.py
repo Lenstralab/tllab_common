@@ -6,15 +6,15 @@ from abc import ABCMeta
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
-from glob import glob
 from functools import wraps
-from inspect import signature, Parameter
+from glob import glob
+from inspect import Parameter, signature
 from pathlib import Path
 from traceback import format_exc, print_exception
 from typing import Any, Callable, Hashable, Sequence, TypeVar
 
-import numpy as np
 import makefun
+import numpy as np
 import pandas
 import regex
 from IPython import embed

@@ -178,6 +178,8 @@ def get_params(parameter_file: [str, Path], template_file: [str, Path] = None,
                 cprint(f'<Parameter <{path}{key}:.b> missing in parameter file, adding with default value: {value}.:r>')
                 parameters[key] = value
             elif isinstance(value, dict):
+                if not isinstance(parameters[key], dict):
+                    parameters[key] = {}
                 check_params(parameters[key], value, f'{path}{key}.')
 
     def check_required(parameters: dict, required: Sequence[dict]) -> None:  # noqa
