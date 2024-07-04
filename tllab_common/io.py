@@ -126,7 +126,7 @@ def yaml_load(stream: [str, bytes, Path, IO]) -> Any:
 
 
 @wraps(yaml.dump)
-def yaml_dump(data: Any, stream: Optional[str, bytes, Path, IO] = None) -> Optional[str]:
+def yaml_dump(data: Any, stream: Optional[str | bytes | Path | IO] = None) -> Optional[str]:
     y = yaml.YAML()
     y.Representer = RoundTripRepresenter
     if isinstance(stream, (str, bytes, Path)):
