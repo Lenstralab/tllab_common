@@ -126,16 +126,18 @@ def yaml_load(stream: [str, bytes, Path, IO]) -> Any:
 
 
 @wraps(yaml.dump)
-def yaml_dump(data: Any, stream: Optional[IO] = None) -> Optional[str]:
+def yaml_dump(data: Any, stream: Optional[str, bytes, Path, IO] = None) -> Optional[str]:
     y = yaml.YAML()
     y.Representer = RoundTripRepresenter
     if isinstance(stream, (str, bytes, Path)):
         with open(stream, 'w') as stream:
             y.dump(data, stream)
-    else:
+    elif stream is None:
         with StringIO() as stream:
             y.dump(data, stream)
             return stream.getvalue()
+    else:
+        y.dump(data, stream)
 
 
 def get_params(parameter_file: [str, Path], template_file: [str, Path] = None,
