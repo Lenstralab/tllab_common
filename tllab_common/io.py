@@ -1,7 +1,7 @@
 import pickle
 from contextlib import ExitStack
 from functools import wraps
-from io import BytesIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from re import sub
 from typing import IO, Any, Callable, Hashable, Iterator, Optional, Sequence, Type
@@ -127,16 +127,21 @@ def yaml_load(stream: [str, bytes, Path, IO]) -> Any:
 
 @wraps(yaml.dump)
 def yaml_dump(data: Any, stream: Optional[IO] = None) -> Optional[str]:
-    with ExitStack() as stack:
-        y = yaml.YAML()
-        y.Representer = RoundTripRepresenter
-        if isinstance(stream, (str, bytes, Path)):
-            stream = stack.enter_context(open(stream, 'w'))
-        return y.dump(data, stream)
+    y = yaml.YAML()
+    y.Representer = RoundTripRepresenter
+    if isinstance(stream, (str, bytes, Path)):
+        with open(stream, 'w') as stream:
+            y.dump(data, stream)
+    else:
+        with StringIO() as stream:
+            y.dump(data, stream)
+            return stream.getvalue()
 
 
 def get_params(parameter_file: [str, Path], template_file: [str, Path] = None,
-               required: Sequence[dict] = None) -> CommentedDefaultMap:
+               required: Sequence[dict] = None, ignore_empty: bool = True, replace_comments: bool = False,
+               replace_values: bool = False, template_file_is_parent: bool = False,
+               compare: bool = False, warn: bool = True) -> CommentedDefaultMap:
     """ Load parameters from a parameterfile and parameters missing from that from the templatefile. Raise an error when
         parameters in required are missing. Return a dictionary with the parameters.
     """
@@ -144,23 +149,23 @@ def get_params(parameter_file: [str, Path], template_file: [str, Path] = None,
     from .misc import cprint
 
     parameter_file = Path(parameter_file)
+    parent_file = Path(template_file) if template_file_is_parent else parameter_file
 
     def yaml_load_and_format(file: Path) -> CommentedDefaultMap:
         with open(file) as f:
             return yaml_load(sub(r'{{\s*(.+)\s*}}', r'{\1}', f.read()).format(
-                name=parameter_file.stem, folder=str(parameter_file.parent), suffix=parameter_file.suffix))
+                name=parent_file.stem, folder=str(parent_file.parent), suffix=parent_file.suffix))
 
-    def more_params(parameters: dict, file: [str, Path]) -> None:
+    def more_params(parameters: dict) -> None:
         """ recursively load more parameters from another file """
-        file = Path(file)
         more_parameters_file = parameters['more_parameters'] or parameters['more_params'] or parameters['moreParams']
         if more_parameters_file is not None:
             more_parameters_file = Path(more_parameters_file)
             if not more_parameters_file.is_absolute():
-                more_parameters_file = Path(file).absolute().parent / more_parameters_file
+                more_parameters_file = Path(parent_file).absolute().parent / more_parameters_file
             cprint(f'<Loading more parameters from <{more_parameters_file}:.b>:g>')
             more_parameters = yaml_load_and_format(more_parameters_file)
-            more_params(more_parameters, file)
+            more_params(more_parameters)
 
             def add_items(sub_params, item):
                 for k, v in item.items():
@@ -171,16 +176,50 @@ def get_params(parameter_file: [str, Path], template_file: [str, Path] = None,
 
             add_items(parameters, more_parameters)
 
-    def check_params(parameters: dict, template: dict, path: str = '') -> None:
+    def check_params(parameters: dict, template: dict, path: str = '') -> None:  # noqa
         """ recursively check parameters and add defaults """
         for key, value in template.items():
-            if key not in parameters and value is not None:
-                cprint(f'<Parameter <{path}{key}:.b> missing in parameter file, adding with default value: {value}.:r>')
+            if key not in parameters and (value is not None or not ignore_empty):
+                if warn:
+                    cprint(f'<Parameter <{path}{key}:.b> missing, adding with value: {value}.:208>')
                 parameters[key] = value
+                if (isinstance(template, yaml.CommentedMap) and isinstance(parameters, yaml.CommentedMap)
+                        and key in template.ca.items):
+                    parameters.yaml_add_eol_comment(template.ca.items[key][2].value, key)
             elif isinstance(value, dict):
-                if not isinstance(parameters[key], dict):
-                    parameters[key] = {}
-                check_params(parameters[key], value, f'{path}{key}.')
+                if isinstance(parameters[key], dict):
+                    check_params(parameters[key], value, f'{path}{key}.')
+                else:
+                    if warn:
+                        if parameters[key] is None:
+                            cprint(f'<Parameter <{path}{key}:.b> empty, adding values: {template[key]}.:208>')
+                        else:
+                            cprint(f'<Overwriting <{path}{key}: {parameters[key]}:.b>.:r>')
+                    parameters[key] = template[key]
+            elif replace_values:
+                parameters[key] = value
+
+        if replace_comments and isinstance(template, yaml.CommentedMap) and isinstance(parameters, yaml.CommentedMap):
+            # don't know how to add comments before items
+            for key, value in template.ca.items.items():
+                if isinstance(value[2], yaml.CommentToken):
+                    parameters.yaml_add_eol_comment(value[2].value, key)
+
+    def compare_params(parameters: Any, template: Any, reverse: bool = False, path: str = '') -> None:  # noqa
+        for key, value in parameters.items():
+            if isinstance(value, dict) and isinstance(template, dict) and key in template:
+                compare_params(value, template[key], reverse, f'{path}{key}.')
+            elif (not (value is None or isinstance(value, dict)) and
+                  isinstance(template, dict) and isinstance(template.get(key), dict)):
+                if reverse:
+                    cprint(f'<New parameter: <{path}{key}:.b>: {value} is not a dictionary anymore.:r>')
+                else:
+                    cprint(f'<Old parameter: <{path}{key}:.b>: {value} is now a dictionary.:r>')
+            elif template is None or isinstance(template, dict) and key not in template:
+                if reverse:
+                    cprint(f'<New parameter: <{path}{key}:.b>: {value}.:g>')
+                else:
+                    cprint(f'<Old parameter: <{path}{key}:.b>: {value}.:208>')
 
     def check_required(parameters: dict, required: Sequence[dict]) -> None:  # noqa
         if required is not None:
@@ -192,12 +231,34 @@ def get_params(parameter_file: [str, Path], template_file: [str, Path] = None,
                     if p not in parameters:
                         raise Exception(f'Parameter {p} not given in parameter file.')
 
+    def check_new_lines(parameters: dict, gap: int = 2) -> None:  # noqa
+        n = len(parameters) - 1
+        for i, (key, value) in enumerate(parameters.items()):  # noqa
+            if isinstance(parameters, yaml.CommentedMap):
+                if key in parameters.ca.items and parameters.ca.items[key][2] is not None:
+                    comment = parameters.ca.items[key][2].value.rstrip('\n') + '\n'
+                    if (gap == 2 or (i == n and gap)) and not isinstance(value, dict):
+                        comment += '\n'
+                    parameters.ca.items[key][2].value = comment
+                elif (gap == 2 or (i == n and gap)) and not isinstance(value, dict):
+                    parameters.yaml_add_eol_comment(' ', key)
+                    parameters.ca.items[key][2].value = '\n\n'
+            if isinstance(value, dict):
+                check_new_lines(value, gap == 2 or (i == n and gap))
+
     params = yaml_load_and_format(parameter_file)
-    more_params(params, parameter_file)
+    more_params(params)
     check_required(params, required)
 
     if template_file is not None:
-        check_params(params, yaml_load(template_file))
+        template = yaml_load(template_file)
+
+        if compare:
+            compare_params(template, params)
+            compare_params(params, template, reverse=True)
+        check_params(params, template)
+
+    check_new_lines(params)
     return params
 
 
