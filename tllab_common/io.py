@@ -186,7 +186,7 @@ def get_params(parameter_file: [str, Path], template_file: [str, Path] = None,
                     cprint(f'<Parameter <{path}{key}:.b> missing, adding with value: {value}.:208>')
                 parameters[key] = value
                 if (isinstance(template, yaml.CommentedMap) and isinstance(parameters, yaml.CommentedMap)
-                        and key in template.ca.items):
+                        and key in template.ca.items and isinstance(template.ca.items[key][2], yaml.CommentToken)):
                     parameters.yaml_add_eol_comment(template.ca.items[key][2].value, key)
             elif isinstance(value, dict):
                 if isinstance(parameters[key], dict):
