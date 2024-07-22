@@ -85,12 +85,16 @@ class Fit(metaclass=ABCMeta):
 
     def get_cost_fun(self) -> Callable[[ArrayLike], float]:
         s = self.s if self.fit_s else 1
+        eps = np.spacing(0)
         if self.log_scale:
             def cost(p: ArrayLike) -> float:
-                return np.nansum(np.abs(self.w / s * (np.log(self.y) - np.log(self.fun(p, self.x))) ** 2))
+                with np.errstate(divide='ignore'):
+                    return np.nansum(np.abs(
+                        self.w / s * (np.log(self.y) - np.log(np.clip(self.fun(p, self.x), eps, None))) ** 2))
         else:
             def cost(p: ArrayLike) -> float:
-                return np.nansum(np.abs(self.w / s * (self.y - self.fun(p, self.x)) ** 2))
+                with np.errstate(divide='ignore'):
+                    return np.nansum(np.abs(self.w / s * (self.y - self.fun(p, self.x)) ** 2))
         return cost
 
     def fit(self) -> Fit:
@@ -99,23 +103,22 @@ class Fit(metaclass=ABCMeta):
 
     @cached_property
     def r(self) -> OptimizeResult:
-        if len(self.x):
-            r = minimize(self.get_cost_fun(), np.asarray(self.p0), method='Nelder-Mead', bounds=self.bounds)
-        else:
-            r = OptimizeResult(fun=np.nan, message='Empty data', nfev=0, nit=0, status=1, success=False,
-                               x=np.full(self.n_p, np.nan))
-        if self.log_scale:
-            self.chi_squared, self.p_ci95, self.r_squared = fminerr(lambda p, x: np.log(self.fun(p, x)), r.x,
-                                                                    np.log(self.y), (self.x,),
-                                                                    self.w, np.log(self.s))
-        else:
-            self.chi_squared, self.p_ci95, self.r_squared = fminerr(self.fun, r.x,
-                                                                    self.y, (self.x,), self.w, self.s)
-        if self.n - self.n_p - 1 > 0:
-            self.r_squared_adjusted = 1 - (1 - self.r_squared) * (self.n - 1) / (self.n - self.n_p - 1)
-        else:
-            self.r_squared_adjusted = np.nan
-        return r
+        with np.errstate(divide='ignore'):
+            if len(self.x):
+                r = minimize(self.get_cost_fun(), np.asarray(self.p0), method='Nelder-Mead', bounds=self.bounds)
+            else:
+                r = OptimizeResult(fun=np.nan, message='Empty data', nfev=0, nit=0, status=1, success=False,
+                                   x=np.full(self.n_p, np.nan))
+            if self.log_scale:
+                self.p_ci95, self.r_squared = fminerr(
+                    lambda p, x: np.log(self.fun(p, x)), r.x, np.log(self.y), (self.x,), self.w, self.s)
+            else:
+                self.p_ci95, self.r_squared = fminerr(self.fun, r.x, self.y, (self.x,), self.w, self.s)
+            if self.n - self.n_p - 1 > 0:
+                self.r_squared_adjusted = 1 - (1 - self.r_squared) * (self.n - 1) / (self.n - self.n_p - 1)
+            else:
+                self.r_squared_adjusted = np.nan
+            return r
 
     @staticmethod
     def sort(p: np.ndarray) -> np.ndarray:
@@ -274,7 +277,7 @@ def nonnan(*args: ArrayLike) -> list[np.ndarray]:
 
 def fminerr(fun: Callable[[ArrayLike, Any], float], a: ArrayLike, y: ArrayLike,
             args: tuple[Any] = (), w: ArrayLike = None, s: ArrayLike = None,
-            diffstep: float = 1e-6) -> tuple[float, np.ndarray, float]:
+            diffstep: float = 1e-6) -> tuple[np.ndarray, float]:
     """ Error estimation of a fit
 
         Inputs:
@@ -283,9 +286,9 @@ def fminerr(fun: Callable[[ArrayLike, Any], float], a: ArrayLike, y: ArrayLike,
         y:    ydata
         args: extra arguments to fun
         w:    weights
+        s:    error on y (std)
 
         Outputs:
-        chisq: Chi^2
         da:    95% confidence interval
         R2:    R^2
 
@@ -303,37 +306,37 @@ def fminerr(fun: Callable[[ArrayLike, Any], float], a: ArrayLike, y: ArrayLike,
     a = np.array(a).flatten()
     y = np.array(y).flatten()
     w = np.ones_like(y) if w is None else np.asarray(w).flatten()
-    s = np.ones_like(y) if s is None else np.asarray(s).flatten()
+    s = np.zeros_like(y) if s is None else np.asarray(s).flatten()
 
     n_data = np.size(y)
     n_par = np.size(a)
 
     if n_data > n_par:
         f0 = np.array(fun(a, *args)).flatten()
-        chisq = np.sum(((f0 - y) * w / s) ** 2) / (n_data - n_par)
+        var_res = (np.sum(w * (f0 - y) ** 2) + np.sum(w * s ** 2)) / (np.sum(w) - n_par)
 
         # calculate R^2
-        sstot = np.sum((y - np.nanmean(y)) ** 2)
-        ssres = np.sum((y - f0) ** 2)
-        r_squared = 1 - ssres / sstot
+        ss_tot = np.sum(w * (y - np.nanmean(y)) ** 2)
+        ss_res = np.sum(w * (y - f0) ** 2)
+        r_squared = 1 - ss_res / ss_tot
 
         # calculate derivatives
-        deriv = np.zeros((n_data, n_par), dtype='complex')
+        jac = np.zeros((n_data, n_par), dtype='complex')
         for i in range(n_par):
             ah = a.copy()
-            ah[i] = a[i] * (1 + diffstep) + eps
+            ah[i] = np.clip(a[i] * (1 + diffstep), eps, None)
             f = np.array(fun(ah, *args)).flatten()
-            deriv[:, i] = (f - f0) / (ah[i] - a[i]) * w / s
+            jac[:, i] = (f - f0) / (ah[i] - a[i])
 
-        hesse = np.matmul(deriv.T, deriv)
+        hesse = np.matmul(jac.T, jac)
 
         try:
             if np.linalg.matrix_rank(hesse) == np.shape(hesse)[0]:
-                da = np.sqrt(chisq * np.diag(np.linalg.inv(hesse)))
+                da = np.sqrt(var_res * np.diag(np.linalg.inv(hesse)))
             else:
-                da = np.sqrt(chisq * np.diag(np.linalg.pinv(hesse)))
+                da = np.sqrt(var_res * np.diag(np.linalg.pinv(hesse)))
         except (Exception,):
             da = np.full_like(a, np.nan)
-        return chisq.real, 1.96 * da.real, r_squared.real
+        return 1.96 * da.real, r_squared.real
     else:
-        return np.nan, np.full_like(a, np.nan), np.nan
+        return np.full_like(a, np.nan), np.nan

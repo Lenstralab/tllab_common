@@ -126,26 +126,30 @@ def yaml_load(stream: [str, bytes, Path, IO]) -> Any:
 
 
 @wraps(yaml.dump)
-def yaml_dump(data: Any, stream: Optional[str | bytes | Path | IO] = None) -> Optional[str]:
+def yaml_dump(data: Any, stream: Optional[str | bytes | Path | IO] = None, unformat: bool = False) -> Optional[str]:
     y = yaml.YAML()
     y.Representer = RoundTripRepresenter
-    if isinstance(stream, (str, bytes, Path)):
+    with StringIO() as str_io:
+        y.dump(data, str_io)
+        s = str_io.getvalue()
+    if unformat:
+        s = sub(r'<<(\w*)>>', r'{{\1}}', s)
+
+    if stream is None:
+        return s
+    elif isinstance(stream, (str, bytes, Path)):
         with open(stream, 'w') as stream:
-            y.dump(data, stream)
-    elif stream is None:
-        with StringIO() as stream:
-            y.dump(data, stream)
-            return stream.getvalue()
+            stream.write(s)
     else:
-        y.dump(data, stream)
+        stream.write(s)
 
 
 def get_params(parameter_file: [str, Path], template_file: [str, Path] = None,
                required: Sequence[dict] = None, ignore_empty: bool = True, replace_comments: bool = False,
                replace_values: bool = False, template_file_is_parent: bool = False,
                compare: bool = False, warn: bool = True) -> CommentedDefaultMap:
-    """ Load parameters from a parameterfile and parameters missing from that from the templatefile. Raise an error when
-        parameters in required are missing. Return a dictionary with the parameters.
+    """ Load parameters from a parameter file and parameters missing from that from the template file. Raise an error
+        when parameters in required are missing. Return a dictionary with the parameters.
     """
 
     from .misc import cprint
@@ -153,9 +157,14 @@ def get_params(parameter_file: [str, Path], template_file: [str, Path] = None,
     parameter_file = Path(parameter_file)
     parent_file = Path(template_file) if template_file_is_parent else parameter_file
 
-    def yaml_load_and_format(file: Path) -> CommentedDefaultMap:
+    def yaml_load_and_format(file: Path, fmt: bool = True) -> CommentedDefaultMap:
+        """ replace patterns in parameter file with parts of the parameter file path
+            {{name}}: name without extension
+            {{folder}}: folder
+            {{suffix}}: extension
+        """
         with open(file) as f:
-            return yaml_load(sub(r'{{\s*(.+)\s*}}', r'{\1}', f.read()).format(
+            return yaml_load(sub(r'{{\s*(.+)\s*}}', r'{\1}' if fmt else r'<<\1>>', f.read()).format(
                 name=parent_file.stem, folder=str(parent_file.parent), suffix=parent_file.suffix))
 
     def more_params(parameters: dict) -> None:
@@ -253,7 +262,7 @@ def get_params(parameter_file: [str, Path], template_file: [str, Path] = None,
     check_required(params, required)
 
     if template_file is not None:
-        template = yaml_load(template_file)
+        template = yaml_load_and_format(template_file, False)
 
         if compare:
             compare_params(template, params)
