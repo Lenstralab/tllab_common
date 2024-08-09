@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from abc import ABCMeta, abstractmethod
+from copy import copy
 from functools import cached_property
 from typing import Any, Callable, Sequence
 
 import numpy as np
 from numpy.typing import ArrayLike
+from parfor import pmap
 from scipy import special, stats
 from scipy.optimize import OptimizeResult, minimize
 
@@ -17,7 +19,8 @@ class Fit(metaclass=ABCMeta):
 
     def __init__(self, x: ArrayLike, y: ArrayLike,
                  w: [ArrayLike, None] = None, s: [ArrayLike, None] = None,
-                 fit_window: Sequence[float] = None, log_scale: bool = False, fit_s: bool = True) -> None:
+                 fit_window: Sequence[float] = None, log_scale: bool = False, fit_s: bool = True,
+                 p0: ArrayLike = None) -> None:
         x = np.asarray(x)
         y = np.asarray(y)
         w = np.ones_like(x) if w is None else np.asarray(w)
@@ -38,6 +41,7 @@ class Fit(metaclass=ABCMeta):
         self.r_squared = None
         self.chi_squared = None
         self.r_squared_adjusted = None
+        self.p0_manual = p0
 
     @property
     @abstractmethod
@@ -103,9 +107,12 @@ class Fit(metaclass=ABCMeta):
 
     @cached_property
     def r(self) -> OptimizeResult:
+        if not hasattr(self, 'p0_manual'):
+            self.p0_manual = None
         with np.errstate(divide='ignore'):
             if len(self.x):
-                r = minimize(self.get_cost_fun(), np.asarray(self.p0), method='Nelder-Mead', bounds=self.bounds)
+                r = minimize(self.get_cost_fun(), np.asarray(self.p0 if self.p0_manual is None else self.p0_manual),
+                             method='Nelder-Mead', bounds=self.bounds, options=dict(maxiter=400 * self.n_p))
             else:
                 r = OptimizeResult(fun=np.nan, message='Empty data', nfev=0, nit=0, status=1, success=False,
                                    x=np.full(self.n_p, np.nan))
@@ -158,6 +165,28 @@ class Fit(metaclass=ABCMeta):
             f_value = (np.abs(rss1 - rss2) / dn) / ((rss1 if swapped else rss2) / (self.n - n))
             p_value = stats.f(dn, self.n - n).sf(f_value)
             return -p_value if swapped else p_value
+
+    def reset(self, log_scale: bool = None, fit_s: bool = True, p0: ArrayLike = None) -> Fit:
+        new = copy(self)
+        if log_scale is not None:
+            if log_scale and not self.log_scale:
+                new.s /= np.abs(new.y)
+            if not log_scale and self.log_scale:
+                new.s *= np.abs(new.y)
+            new.log_scale = log_scale
+        if fit_s is not None:
+            new.fit_s = fit_s
+        if p0 is not None:
+            new.p0_manual = p0
+        if hasattr(new, 'r'):
+            delattr(new, 'r')
+        return new
+
+    def get_best_p0(self, space: np.ndarray) -> Fit:
+        bounds = np.array([(-np.inf if i[0] is None else i[0], np.inf if i[1] is None else i[1])
+                           for i in self.bounds]).T
+        p0 = np.clip(np.stack(np.meshgrid(*self.n_p * (space,)), 0).reshape((self.n_p, -1)).T * self.p0, *bounds)
+        return self.reset(p0=p0[np.argmin(pmap(self.get_cost_fun(), p0, desc='finding best p0', leave=False))])
 
 
 class Exponential1(Fit):

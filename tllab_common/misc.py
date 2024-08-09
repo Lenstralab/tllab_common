@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import pickle
 import re
 import sys
@@ -23,6 +25,89 @@ from ruamel import yaml
 from .io import get_params, pickle_dump, yaml_load
 
 Number = int | float | complex
+
+
+R = TypeVar('R')
+
+
+def wraps_combine(wrapper: Callable[[Any, ...], Any] | type, ignore: Sequence[str] = None) -> Callable[[Any, ...], R]:
+    """ decorator to combine arguments and doc strings of wrapped and wrapper functions,
+        *args and/or **kwargs in wrapped will be replaced by the arguments from wrapper,
+        duplicate arguments will be left in place in wrapped
+
+        example:
+
+        def wrapper(a, b, c, **kwargs):
+            return a + b + c
+
+        @wraps_combine(wrapper)
+        def wrapped(a, d, e=45, *args, f=5, **kwargs):
+            return d * e * wrapper(*args, **kwargs)
+
+        signature: wrapped(a, d, e, b, c, *, f=5, **kwargs)
+    """
+
+    if ignore is None:
+        ignore = []
+
+    def wrap(wrapped: Callable[[Any, ...], R]) -> Callable[[Any, ...], R]:
+        sig_wrapper = signature(wrapper.__init__ if isinstance(wrapper, type) else wrapper)
+        sig_wrapped = signature(wrapped.__init__ if isinstance(wrapped, type) else wrapped)
+        z = [(p, p.name, p.kind) for p in sig_wrapped.parameters.values()]
+        p1, n1, k1 = zip(*z) if len(z) else ((), (), ())
+        z = [(p, p.name, p.kind) for p in sig_wrapper.parameters.values()
+             if (p.kind in (Parameter.VAR_POSITIONAL, Parameter.VAR_KEYWORD) or p.name not in n1) and
+             p.name not in ignore]
+        p0, n0, k0 = zip(*z) if len(z) else ((), (), ())
+
+        idx0a = k0.index(Parameter.VAR_POSITIONAL) if Parameter.VAR_POSITIONAL in k0 else None
+        idx0k = k0.index(Parameter.VAR_KEYWORD) if Parameter.VAR_KEYWORD in k0 else None
+        idx1a = k1.index(Parameter.VAR_POSITIONAL) if Parameter.VAR_POSITIONAL in k1 else None
+        idx1k = k1.index(Parameter.VAR_KEYWORD) if Parameter.VAR_KEYWORD in k1 else None
+
+        if idx1a is not None:
+            if idx0a:
+                new_parameters = [Parameter(p.name, p.kind, annotation=p.annotation) for p in p1[:idx1a]]
+            else:
+                new_parameters = list(p1[:idx1a])
+            if len(new_parameters) == 0 or new_parameters[-1].default == Parameter.empty:
+                new_parameters.extend(p0[:idx0k])
+            else:
+                new_parameters.extend([Parameter(p.name, p.kind,
+                                                 default='empty' if p.default == Parameter.empty else p.default,
+                                                 annotation=p.annotation)
+                                       for p in p0[:idx0k]])
+            new_parameters.extend(p1[idx1a + 1:idx1k])
+        elif idx1k is not None:
+            if idx0a is not None:
+                new_parameters = list(p1[:idx1k])
+            else:
+                new_parameters = [Parameter(p.name, p.kind, annotation=p.annotation) for p in p1[:idx1k]]
+            new_parameters.extend([Parameter(p.name, Parameter.KEYWORD_ONLY,
+                                             default='empty' if p.default == Parameter.empty else p.default,
+                                             annotation=p.annotation)
+                                   for p in p0[:(idx0k if idx0a is None else idx0a)]])
+        else:
+            new_parameters = list(p1)
+        if idx0k is not None:
+            new_parameters.append(p0[idx0k])
+
+        if wrapped.__doc__ and wrapper.__doc__:
+            doc = f"{wrapped.__doc__}\n\nwrapping {wrapper.__name__}:\n\n{wrapper.__doc__.lstrip(' ')}"
+        elif wrapped.__doc__:
+            doc = wrapped.__doc__
+        elif wrapper.__doc__:
+            doc = wrapper.__doc__
+        else:
+            doc = None
+
+        @makefun.wraps(wrapped, new_sig=sig_wrapper.replace(parameters=new_parameters), doc=doc)
+        def fun(*args: Any, **kwargs: Any) -> R:
+            return wrapped(*args, **kwargs)
+
+        return fun
+
+    return wrap  # type: ignore
 
 
 class Struct(dict):
@@ -87,7 +172,7 @@ yaml.RoundTripRepresenter.add_representer(Struct, yaml.RoundTripRepresenter.repr
 @dataclass
 class ErrorValue:
     """ format a value and its error with equal significance
-        example f"value = {ErrorValue(1.23234, 0.34463):.2g}"
+        example f'value = {ErrorValue(1.23234, 0.34463):.2g}'
     """
     value: Number
     error: Number
@@ -130,6 +215,7 @@ def cfmt(string: str) -> str:
     fmt_split = regex.compile(r'(?:^|\W?)([a-zA-Z]|\d+)?')
     str_sub = regex.compile(r'(?:^|\\)((?:\\\\)*[<>])')
 
+    # noinspection PyShadowingNames
     def format_fmt(fmt: str) -> str:
         f = fmt_split.findall(fmt)[:3]
         color, decoration, background = f + [None] * max(0, (3 - len(f)))
@@ -159,6 +245,7 @@ def cfmt(string: str) -> str:
     return str_sub.sub(r'\1', string)
 
 
+@wraps_combine(print)
 def cprint(*args, **kwargs):
     """ print colored text
         text between <> is colored, escape using \\ to print <>
@@ -192,88 +279,6 @@ def format_list(string: str, lst: Sequence, fmt: str = None) -> str:
                              *[option[1] for option in plurals])
 
 
-class Color:
-    """ deprecated: use cprint instead
-        print colored text:
-            print(color('Hello World!', 'r:b'))
-            print(color % 'r:b' + 'Hello World! + color)
-            print(f'{color("r:b")}Hello World!{color}')
-        text: text to be colored/decorated
-        fmt: string: 'k': black, 'r': red', 'g': green, 'y': yellow, 'b': blue, 'm': magenta, 'c': cyan, 'w': white
-            'b'  text color
-            '.r' background color
-            ':b' decoration: 'b': bold, 'u': underline, 'r': reverse
-            for colors also terminal color codes can be used
-
-        example: >> print(color('Hello World!', 'b.208:b'))
-                 << Hello world! in blue bold on orange background
-
-        wp@tl20191122
-    """
-
-    def __init__(self, fmt=None):
-        self._open = False
-
-    def _fmt(self, fmt=None):
-        if fmt is None:
-            self._open = False
-            return '\033[0m'
-
-        if not isinstance(fmt, str):
-            fmt = str(fmt)
-
-        decorS = [i.group(0) for i in regex.finditer(r'(?<=:)[a-zA-Z]', fmt)]
-        backcS = [i.group(0) for i in regex.finditer(r'(?<=\.)[a-zA-Z]', fmt)]
-        textcS = [i.group(0) for i in regex.finditer(r'((?<=[^.:])|^)[a-zA-Z]', fmt)]
-        backcN = [i.group(0) for i in regex.finditer(r'(?<=\.)\d{1,3}', fmt)]
-        textcN = [i.group(0) for i in regex.finditer(r'((?<=[^.:\d])|^)\d{1,3}', fmt)]
-
-        t = 'krgybmcw'
-        d = {'b': 1, 'u': 4, 'r': 7}
-
-        text = ''
-        for i in decorS:
-            if i.lower() in d:
-                text = '\033[{}m{}'.format(d[i.lower()], text)
-        for i in backcS:
-            if i.lower() in t:
-                text = '\033[48;5;{}m{}'.format(t.index(i.lower()), text)
-        for i in textcS:
-            if i.lower() in t:
-                text = '\033[38;5;{}m{}'.format(t.index(i.lower()), text)
-        for i in backcN:
-            if 0 <= int(i) <= 255:
-                text = '\033[48;5;{}m{}'.format(int(i), text)
-        for i in textcN:
-            if 0 <= int(i) <= 255:
-                text = '\033[38;5;{}m{}'.format(int(i), text)
-        if self._open:
-            text = '\033[0m' + text
-        self._open = len(decorS or backcS or textcS or backcN or textcN) > 0
-        return text
-
-    def __mod__(self, fmt):
-        return self._fmt(fmt)
-
-    def __add__(self, text):
-        return self._fmt() + text
-
-    def __radd__(self, text):
-        return text + self._fmt()
-
-    def __str__(self):
-        return self._fmt()
-
-    def __call__(self, *args):
-        if len(args) == 2:
-            return self._fmt(args[1]) + args[0] + self._fmt()
-        else:
-            return self._fmt(args[0])
-
-    def __repr__(self):
-        return self._fmt()
-
-
 def ipy_debug():
     """ Enter ipython after an exception occurs any time after executing this. """
     def excepthook(etype, value, traceback):
@@ -295,7 +300,7 @@ def get_slice(shape, n):
         raise IndexError('an index can only have a single ellipsis (...)')
     if len(ell):
         if len(n) > ndim:
-            n.remove(Ellipsis)
+            n.remove(Ellipsis)  # type: ignore
         else:
             n[ell[0]] = None
             while len(n) < ndim:
@@ -324,12 +329,12 @@ def get_slice(shape, n):
                 stop = s
             elif stop < 0:
                 stop = 0
-            n[i] = slice(start, stop, step)
+            n[i] = slice(start, stop, step)  # type: ignore
         else:
             a = np.asarray(n[i])
             if not np.all(a[:-1] <= a[1:]):
                 raise NotImplementedError('unsorted slicing arrays are not supported')
-            n[i] = a[(0 <= a) * (a < s)]
+            n[i] = a[(0 <= a) * (a < s)]  # type: ignore
             pad.append((sum(a < 0), sum(a >= s)))
 
     return n, pad
@@ -360,7 +365,7 @@ class SliceKeepSize:
         n, pad = get_slice(self.array.shape, n)
         crop = self.array[tuple(n)]
         default = self.default(crop) if callable(self.default) else self.default
-        return np.pad(crop, pad, constant_values=default)
+        return np.pad(crop, pad, constant_values=default)  # type: ignore
 
     def __setitem__(self, n, value):
         n = np.vstack(n)
@@ -373,6 +378,8 @@ class SliceKeepSize:
 
 class Data(metaclass=ABCMeta):
     params = None
+    channels: dict
+    colors: dict
 
     def __init__(self):
         self.stage = set()
@@ -435,8 +442,8 @@ class Data(metaclass=ABCMeta):
                        if file.name.startswith(f'{self.__class__.__name__.lower()}_') and file.suffix == '.pickle']
             if pickles:
                 pickles.remove(max(pickles))
-                for pickle in pickles:
-                    pickle.unlink()
+                for pkl in pickles:
+                    pkl.unlink()
 
     def color(self, color_or_channel):
         return color_or_channel if isinstance(color_or_channel, str) else self.channels[color_or_channel]
@@ -450,6 +457,7 @@ def df_join(h: pandas.DataFrame) -> pandas.DataFrame:
     """
     groups = h.groupby(level=0)
     n = len(groups)
+    df, j = None, None
     for a, (i, g) in enumerate(groups):
         if a == 0:
             df = g.droplevel(0)
@@ -469,87 +477,6 @@ def add_extra_parameters(parameters: dict[Hashable, Any], extra_parameters: dict
             parameters[key] = value
 
 
-R = TypeVar('R')
-
-
-def wraps_combine(wrapper: Callable[[Any, ...], Any] | type) -> Callable[[Any, ...], R]:
-    """ decorator to combine arguments and doc strings of wrapped and wrapper functions,
-        *args and/or **kwargs in wrapped will be replaced by the arguments from wrapper,
-        duplicate arguments will be left in place in wrapped
-
-        example:
-
-        def wrapper(a, b, c, **kwargs):
-            return a + b + c
-
-        @wraps_combine(wrapper)
-        def wrapped(a, d, e=45, *args, f=5, **kwargs):
-            return d * e * wrapper(*args, **kwargs)
-
-        signature: wrapped(a, d, e, b, c, *, f=5, **kwargs)
-    """
-
-    def wrap(wrapped: Callable[[Any, ...], R]) -> Callable[[Any, ...], R]:
-        if isinstance(wrapper, type):
-            sig_wrapper = signature(wrapper.__init__)
-        else:
-            sig_wrapper = signature(wrapper)
-        sig_wrapped = signature(wrapped)
-        p1, n1, k1 = zip(*[(p, p.name, p.kind) for p in sig_wrapped.parameters.values()])
-        p0, n0, k0 = zip(*[(p, p.name, p.kind) for p in sig_wrapper.parameters.values()
-                           if p.kind in (Parameter.VAR_POSITIONAL, Parameter.VAR_KEYWORD) or p.name not in n1])
-
-        idx0a = k0.index(Parameter.VAR_POSITIONAL) if Parameter.VAR_POSITIONAL in k0 else None
-        idx0k = k0.index(Parameter.VAR_KEYWORD) if Parameter.VAR_KEYWORD in k0 else None
-        idx1a = k1.index(Parameter.VAR_POSITIONAL) if Parameter.VAR_POSITIONAL in k1 else None
-        idx1k = k1.index(Parameter.VAR_KEYWORD) if Parameter.VAR_KEYWORD in k1 else None
-
-        if idx1a is not None:
-            if idx0a:
-                new_parameters = [Parameter(p.name, p.kind, annotation=p.annotation) for p in p1[:idx1a]]
-            else:
-                new_parameters = list(p1[:idx1a])
-            if new_parameters[-1].default == Parameter.empty:
-                new_parameters.extend(p0[:idx0k])
-            else:
-                new_parameters.extend([Parameter(p.name, p.kind,
-                                                 default='empty' if p.default == Parameter.empty else p.default,
-                                                 annotation=p.annotation)
-                                       for p in p0[:idx0k]])
-            new_parameters.extend(p1[idx1a + 1:idx1k])
-        elif idx1k is not None:
-            if idx0a is not None:
-                new_parameters = list(p1[:idx1k])
-            else:
-                new_parameters = [Parameter(p.name, p.kind, annotation=p.annotation) for p in p1[:idx1k]]
-            new_parameters.extend([Parameter(p.name, Parameter.KEYWORD_ONLY,
-                                             default='empty' if p.default == Parameter.empty else p.default,
-                                             annotation=p.annotation)
-                                  for p in p0[:(idx0k if idx0a is None else idx0a)]])
-        else:
-            raise ValueError(f'No *args or **kwargs in {wrapped.__name__}{sig_wrapped}')
-        if idx0k is not None:
-            new_parameters.append(p0[idx0k])
-
-        if wrapped.__doc__ and wrapper.__doc__:
-            doc = f"{wrapped.__doc__}\n\ninherited from:\n\n{wrapper.__doc__.lstrip(' ')}"
-        elif wrapped.__doc__:
-            doc = wrapped.__doc__
-        elif wrapper.__doc__:
-            doc = wrapper.__doc__
-        else:
-            doc = None
-
-        @makefun.wraps(wrapped, new_sig=sig_wrapper.replace(parameters=new_parameters), doc=doc)
-        def fun(*args: Any, **kwargs: Any) -> R:
-            return wrapped(*args, **kwargs)
-
-        return fun
-
-    return wrap  # type: ignore
-
-
-color = Color()
 get_config = yaml_load
 getConfig = get_config
 getParams = get_params
