@@ -118,9 +118,9 @@ class Fit(metaclass=ABCMeta):
                                    x=np.full(self.n_p, np.nan))
             if self.log_scale:
                 self.p_ci95, self.r_squared = fminerr(
-                    lambda p, x: np.log(self.fun(p, x)), r.x, np.log(self.y), (self.x,), self.w, self.s)
+                    lambda p, x: np.log(self.fun(p, x)), self.sort(r.x), np.log(self.y), (self.x,), self.w, self.s)
             else:
-                self.p_ci95, self.r_squared = fminerr(self.fun, r.x, self.y, (self.x,), self.w, self.s)
+                self.p_ci95, self.r_squared = fminerr(self.fun, self.sort(r.x), self.y, (self.x,), self.w, self.s)
             if self.n - self.n_p - 1 > 0:
                 self.r_squared_adjusted = 1 - (1 - self.r_squared) * (self.n - 1) / (self.n - self.n_p - 1)
             else:
