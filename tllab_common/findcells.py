@@ -9,15 +9,10 @@ from tqdm.auto import tqdm
 
 
 def maskpk(pk, mask):
-    #    """ remove points in nx2 array which are located outside mask
-    #        wp@tl20190709
-    #        """
-    pk = np.round(pk)
-    idx = []
-    for i in range(pk.shape[0]):
-        if mask[pk[i, 0], pk[i, 1]]:
-            idx.append(i)
-    return pk[idx, :]
+    """ remove points in nx2 array which are located outside mask
+        wp@tl20190709
+    """
+    return pk[[mask[tuple(p)] > 0 for p in np.round(pk).astype(int)], :]
 
 
 def disk(s):
