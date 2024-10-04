@@ -1,43 +1,41 @@
 [tool.poetry]
 name = "tllab_common"
-version = "2024.9.0"
+version = "2024.10.0"
 description = "Common code for the Lenstra lab."
 authors = ["Lenstra lab NKI <t.lenstra@nki.nl>"]
 license = "GPLv3"
 readme = "README.md"
 keywords = ["burst", "transcription"]
-include = ["transform.txt"]
+include = ["transform.txt", "trackmate.jy"]
 repository = "https://github.com/Lenstralab/tllab_common"
 
 [tool.poetry.dependencies]
 python = "^3.10"
-untangle = "*"
 pandas  = "*"
-psutil = "*"
 numpy = ">=1.20.0"
 tqdm = "*"
-tifffile = "*"
-czifile = "*"
 "ruamel.yaml" = "*"
 dill = "*"
-colorcet = "*"
 scipy = "*"
-tiffwrite = "*"
 roifile = "*"
 ipython = "*"
 regex = "*"
 bidict = "*"
 makefun = "*"
 scikit-image = "*"
+cellpose = ">=3.0"
+csbdeep = "*"
+tensorflow = "*"
+pyimagej = "*"
+scyjava = "*"
 parfor = "*"
-pytest-xdist = { version = "*", optional = true }
+ndbioimage = ">=2024.7.0"
+tiffwrite = ">=2024.10.1"
+pytrackmate = { path = "external/pytrackmate" }
+pytest = { version = "*", optional = true }
 
 [tool.poetry.extras]
 test = ["pytest"]
-transforms = ["SimpleITK-SimpleElastix"]
-
-[tool.poetry.scripts]
-wimread = "tllab_common.wimread:main"
 
 [tool.isort]
 line_length = 119

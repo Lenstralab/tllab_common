@@ -1,0 +1,119 @@
+#@ String file_in
+#@ String file_out
+#@ Integer MIN_AREA
+#@ Integer TARGET_CHANNEL
+#@ boolean SIMPLIFY_CONTOURS
+#@ Integer MAX_FRAME_GAP
+#@ Float ALTERNATIVE_LINKING_COST_FACTOR
+#@ Float LINKING_MAX_DISTANCE
+#@ Float GAP_CLOSING_MAX_DISTANCE
+#@ Float SPLITTING_MAX_DISTANCE
+#@ boolean ALLOW_GAP_CLOSING
+#@ boolean ALLOW_TRACK_SPLITTING
+#@ boolean ALLOW_TRACK_MERGING
+#@ Float MERGING_MAX_DISTANCE
+#@ Float CUTOFF_PERCENTILE
+
+import os
+import sys
+from java.lang import System
+from java.io import PrintStream, File
+from ij import IJ
+from fiji.plugin.trackmate import Model
+from fiji.plugin.trackmate import Settings
+from fiji.plugin.trackmate import TrackMate
+from fiji.plugin.trackmate.detection import LabelImageDetectorFactory
+from fiji.plugin.trackmate.tracking.jaqaman import SparseLAPTrackerFactory
+from fiji.plugin.trackmate.io import TmXmlWriter
+import fiji.plugin.trackmate.features.FeatureFilter as FeatureFilter
+
+# largely copied from: https://imagej.net/plugins/trackmate/scripting
+
+System.setOut(PrintStream(File(os.devnull)))
+
+# We have to do the following to avoid errors with UTF8 chars generated in
+# TrackMate that will mess with our Fiji Jython.
+reload(sys)
+sys.setdefaultencoding('utf-8')
+
+# Get currently selected image
+# imp = WindowManager.getCurrentImage()
+imp = IJ.openImage(file_in)
+
+# ----------------------------
+# Create the model object now
+# ----------------------------
+
+# Some of the parameters we configure below need to have
+# a reference to the model at creation. So we create an
+# empty model now.
+
+model = Model()
+
+# ------------------------
+# Prepare settings object
+# ------------------------
+
+settings = Settings(imp)
+
+# Configure detector - We use the Strings for the keys
+settings.detectorFactory = LabelImageDetectorFactory()
+settings.detectorSettings = {
+    'TARGET_CHANNEL': TARGET_CHANNEL,
+    'SIMPLIFY_CONTOURS': SIMPLIFY_CONTOURS,
+}
+
+filter1 = FeatureFilter('AREA', MIN_AREA, True)
+settings.addSpotFilter(filter1)
+
+# Configure tracker - We want to allow merges and fusions
+settings.trackerFactory = SparseLAPTrackerFactory()
+settings.trackerSettings = settings.trackerFactory.getDefaultSettings() # almost good enough
+
+settings.trackerSettings['MAX_FRAME_GAP'] = MAX_FRAME_GAP
+settings.trackerSettings['ALTERNATIVE_LINKING_COST_FACTOR'] = ALTERNATIVE_LINKING_COST_FACTOR
+settings.trackerSettings['LINKING_MAX_DISTANCE'] = LINKING_MAX_DISTANCE
+settings.trackerSettings['GAP_CLOSING_MAX_DISTANCE'] = GAP_CLOSING_MAX_DISTANCE
+settings.trackerSettings['SPLITTING_MAX_DISTANCE'] = SPLITTING_MAX_DISTANCE
+settings.trackerSettings['ALLOW_GAP_CLOSING'] = ALLOW_GAP_CLOSING
+settings.trackerSettings['ALLOW_TRACK_SPLITTING'] = ALLOW_TRACK_SPLITTING
+settings.trackerSettings['ALLOW_TRACK_MERGING'] = ALLOW_TRACK_MERGING
+settings.trackerSettings['MERGING_MAX_DISTANCE'] = MERGING_MAX_DISTANCE
+settings.trackerSettings['CUTOFF_PERCENTILE'] = CUTOFF_PERCENTILE
+
+
+# Add ALL the feature analyzers known to TrackMate. They will
+# yield numerical features for the results, such as speed, mean intensity etc.
+settings.addAllAnalyzers()
+
+# Configure track filters - We want to get rid of the two immobile spots at
+# the bottom right of the image. Track displacement must be above 10 pixels.
+
+# -------------------
+# Instantiate plugin
+# -------------------
+
+trackmate = TrackMate(model, settings)
+
+# --------
+# Process
+# --------
+
+ok = trackmate.checkInput()
+if not ok:
+    sys.exit(str(trackmate.getErrorMessage()))
+
+ok = trackmate.process()
+if not ok:
+    sys.exit(str(trackmate.getErrorMessage()))
+
+
+# ----------------
+# Save results
+# ----------------
+
+f = File(file_out)
+t = TmXmlWriter(f, model.getLogger())
+t.appendModel(model)
+t.appendSettings(settings)
+t.writeToFile()

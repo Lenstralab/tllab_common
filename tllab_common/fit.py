@@ -326,7 +326,7 @@ def fminerr(fun: Callable[[ArrayLike, Any], float], a: ArrayLike, y: ArrayLike,
         a = np.array((2,-3))
         y = (15,0,5,30,50)
         fun = lambda a: a[0]*x**2+a[1]
-        chisq, dp, R2 = fminerr(fun, p, y)
+        dp, R2 = fminerr(fun, p, y)
 
         adjusted from Matlab version by Thomas Schmidt, Leiden University
         wp@tl2020
