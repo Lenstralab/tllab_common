@@ -10,11 +10,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from functools import wraps
 from glob import glob
-from inspect import Parameter, signature
+from inspect import getfile, Parameter, signature
 from pathlib import Path
+from shutil import copyfile
 from traceback import format_exc, print_exception
 from typing import Any, Callable, Hashable, Sequence, TypeVar
 
+from bidict import bidict
 import makefun
 import numpy as np
 import pandas
@@ -22,7 +24,12 @@ import regex
 from IPython import embed
 from ruamel import yaml
 
-from .io import get_params, pickle_dump, yaml_load
+from .io import get_params, pickle_dump, yaml_dump, yaml_load
+
+try:
+    from typing import Self
+except ImportError:
+    from typing_extensions import Self
 
 Number = int | float | complex
 
@@ -218,22 +225,22 @@ def cfmt(string: str) -> str:
     # noinspection PyShadowingNames
     def format_fmt(fmt: str) -> str:
         f = fmt_split.findall(fmt)[:3]
-        color, decoration, background = f + [None] * max(0, (3 - len(f)))
+        color, decoration, background = f + [''] * max(0, (3 - len(f)))
 
         t = 'KRGYBMCWargybmcwk'
         d = {'b': 1, 'u': 4, 'r': 7}
         text = ''
-        if color:
+        if len(color):
             if color.isnumeric() and 0 <= int(color) <= 255:
                 text = f'\033[38;5;{color}m{text}'
             elif not color.isnumeric() and color in t:
                 text = f'\033[38;5;{t.index(color)}m{text}'
-        if background:
+        if len(background):
             if background.isnumeric() and 0 <= int(background) <= 255:
                 text = f'\033[48;5;{background}m{text}'
             elif not background.isnumeric() and background in t:
                 text = f'\033[48;5;{t.index(background)}m{text}'
-        if decoration and decoration.lower() in d:
+        if len(decoration) and decoration.lower() in d:
             text = f'\033[{d[decoration.lower()]}m{text}'
         return text
 
@@ -378,22 +385,22 @@ class SliceKeepSize:
 
 class Data(metaclass=ABCMeta):
     params = None
-    channels: dict
-    colors: dict
+    channels: bidict
+    colors: bidict
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.stage = set()
         self.runtime = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *args, **kwargs):
+    def __exit__(self, *args: Any, **kwargs: Any) -> None:
         self.error = format_exc()
         self.save()
 
     @classmethod
-    def load(cls, file):
+    def load(cls, file: Path | str) -> Self:
         files = glob(str(file))
         if len(files) == 0:
             raise FileNotFoundError
@@ -405,7 +412,7 @@ class Data(metaclass=ABCMeta):
         return new
 
     @staticmethod
-    def stage_rec(fun):
+    def stage_rec(fun: Callable) -> Callable:
         def wrap(self, *args, **kwargs):
             res = fun(self, *args, **kwargs)
             self.stage.add(fun.__name__)
@@ -413,14 +420,14 @@ class Data(metaclass=ABCMeta):
 
         return wrap
 
-    def save(self, file=None):
+    def save(self, file: Path | str = None) -> None:
         if file is None and hasattr(self, 'folder_out'):
             file = self.folder_out / f'{self.__class__.__name__.lower()}_{self.runtime}.pickle'
         if file is not None:
             pickle_dump(self, file)
 
     @classmethod
-    def load_from_parameter_file(cls, parameter_file):
+    def load_from_parameter_file(cls, parameter_file: Path | str) -> Self:
         parameter_file = Path(parameter_file)
         params = getParams(parameter_file.with_suffix('.yml'), required=({'paths': ('folder_out',)},))
         if Path(params['paths']['folder_out']).exists():
@@ -433,10 +440,10 @@ class Data(metaclass=ABCMeta):
                 f"No files matching {Path(params['paths']['folder_out']) / f'{cls.__name__.lower()}_*.pickle'}")
         return cls.load(max(pickles))
 
-    def run(self):
+    def run(self) -> None:
         self.runtime = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    def clean(self):
+    def clean(self) -> None:
         if Path(self.params['paths']['folder_out']).exists():
             pickles = [file for file in Path(self.params['paths']['folder_out']).iterdir()
                        if file.name.startswith(f'{self.__class__.__name__.lower()}_') and file.suffix == '.pickle']
@@ -445,11 +452,41 @@ class Data(metaclass=ABCMeta):
                 for pkl in pickles:
                     pkl.unlink()
 
-    def color(self, color_or_channel):
+    def color(self, color_or_channel: int | str) -> str:
         return color_or_channel if isinstance(color_or_channel, str) else self.channels[color_or_channel]
 
-    def channel(self, color_or_channel):
+    def channel(self, color_or_channel: int | str) -> int:
         return self.colors[color_or_channel] if isinstance(color_or_channel, str) else color_or_channel
+
+    @classmethod
+    def get_template_file(cls) -> Path:
+        return Path(getfile(cls).replace('.py', '_parameters_template.yml'))
+
+    @classmethod
+    def copy_template_file(cls) -> None:
+        source = cls.get_template_file()
+        cwd = Path.cwd()
+        stem = source.stem
+        suffix = source.suffix
+        dest = cwd / source.name
+
+        i = 0
+        while dest.exists():
+            i += 1
+            dest = cwd / f'{stem}_{i}{suffix}'
+
+        copyfile(source, dest)
+
+    @classmethod
+    def update_parameter_file(cls, parameter_file: str | Path) -> None:
+        parameter_file = Path(parameter_file)
+        new_parameter_file = parameter_file.parent / f'{parameter_file.stem}_updated.yml'
+        if new_parameter_file.exists():
+            raise FileExistsError(f'File {new_parameter_file} already exists.')
+        else:
+            template = cls.get_template_file()
+            yaml_dump(get_params(template, parameter_file, replace_values=True, template_file_is_parent=True,
+                                 compare=True, warn=False), new_parameter_file, unformat=True)
 
 
 def df_join(h: pandas.DataFrame) -> pandas.DataFrame:

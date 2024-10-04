@@ -58,7 +58,7 @@ def dill_dataframe(pickler: Pickler, df: pandas.DataFrame):
 
 
 @wraps(pickle.dump)
-def pickle_dump(obj, file: Optional[IO] = None, *args, **kwargs) -> Optional[str]:
+def pickle_dump(obj, file: IO | Path | str = None, *args, **kwargs) -> Optional[str]:
     with ExitStack() as stack:
         if isinstance(file, (str, Path)):
             f = stack.enter_context(open(file, 'wb'))
@@ -72,7 +72,7 @@ def pickle_dump(obj, file: Optional[IO] = None, *args, **kwargs) -> Optional[str
 
 
 @wraps(pickle.load)
-def pickle_load(file: [bytes, str, Path, IO]) -> Any:
+def pickle_load(file: bytes | str | Path | IO) -> Any:
     if isinstance(file, bytes):
         return pickle.loads(file)
     elif isinstance(file, (str, Path)):
@@ -113,7 +113,7 @@ RoundTripRepresenter.add_representer(CommentedDefaultMap, RoundTripRepresenter.r
 
 
 @wraps(yaml.load)
-def yaml_load(stream: [str, bytes, Path, IO]) -> Any:
+def yaml_load(stream: str | bytes | Path | IO) -> Any:
     with ExitStack() as stack:
         y = yaml.YAML()
         y.Constructor = RoundTripConstructor
@@ -126,12 +126,12 @@ def yaml_load(stream: [str, bytes, Path, IO]) -> Any:
 
 
 @wraps(yaml.dump)
-def yaml_dump(data: Any, stream: Optional[str | bytes | Path | IO] = None, unformat: bool = False) -> Optional[str]:
+def yaml_dump(data: Any, stream: str | bytes | Path | IO = None, unformat: bool = False) -> Optional[str]:
     y = yaml.YAML()
     y.Representer = RoundTripRepresenter
     with StringIO() as str_io:
         y.dump(data, str_io)
-        s = str_io.getvalue()
+        s = str_io.getvalue()  # noqa
     if unformat:
         s = sub(r'<<(\w*)>>', r'{{\1}}', s)
 
@@ -144,7 +144,7 @@ def yaml_dump(data: Any, stream: Optional[str | bytes | Path | IO] = None, unfor
         stream.write(s)
 
 
-def get_params(parameter_file: [str, Path], template_file: [str, Path] = None,
+def get_params(parameter_file: Path | str, template_file: Path | str = None,
                required: Sequence[dict] = None, ignore_empty: bool = True, replace_comments: bool = False,
                replace_values: bool = False, template_file_is_parent: bool = False,
                compare: bool = False, warn: bool = True) -> CommentedDefaultMap:
@@ -273,8 +273,8 @@ def get_params(parameter_file: [str, Path], template_file: [str, Path] = None,
     return params
 
 
-def save_roi(file: [str, Path], coordinates: pandas.DataFrame, shape: tuple, columns: Optional[Sequence[str]] = None,
-             name: Optional[str] = None):
+def save_roi(file: Path | str, coordinates: pandas.DataFrame, shape: tuple, columns: Sequence[str] = None,
+             name: str = None) -> None:
     if columns is None:
         columns = 'xyCzT'
     coordinates = coordinates.copy()

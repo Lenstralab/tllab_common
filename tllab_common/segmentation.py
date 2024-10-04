@@ -181,7 +181,7 @@ def connect_nuclei_with_cells(nuclei: ArrayLike, cells: ArrayLike) -> np.ndarray
     return cells_new
 
 
-def trackmate_fiji(file_in: Path, file_out: Path, fiji_path: Path = None,
+def trackmate_fiji(file_in: Path | str, file_out: Path | str, fiji_path: Path | str = None,
                    channel: int = 0, **kwargs: dict[str, [str, int, float, bool]]) -> None:
     if fiji_path is None:
         fiji_path = Path('/DATA/opt/Fiji.app')
@@ -200,7 +200,7 @@ def trackmate_fiji(file_in: Path, file_out: Path, fiji_path: Path = None,
     ij.dispose()
 
 
-def trackmate(tif_file: Path, tiff_out: Path, table_out: Path = None, min_frames: int = None,
+def trackmate(tif_file: Path | str, tiff_out: Path | str, table_out: Path | str = None, min_frames: int = None,
               **kwargs: dict[str, str]) -> None:
     """ run trackmate to make sure cells have the same label in all frames, relabel even if there's just one frame,
         to make sure that cell numbers are consecutive """
@@ -243,8 +243,8 @@ def trackmate(tif_file: Path, tiff_out: Path, table_out: Path = None, min_frames
                 tif.save(frame, c, 0, t)
 
 
-def run_stardist(image: Path, tiff_out: Path, channel_cell: int, *,
-                 model_type: str = None, table_out: Path = None, tm_kwargs: dict[str, str] = None) -> None:
+def run_stardist(image: Path | str, tiff_out: Path | str, channel_cell: int, *,
+                 model_type: str = None, table_out: Path | str = None, tm_kwargs: dict[str, str] = None) -> None:
     if model_type is None:
         model_type = '2D_versatile_fluo'
     with redirect_stdout(StringIO()):
@@ -284,8 +284,8 @@ class CellPoseTiff(IJTiffFile):
                     super().compress_frame(nuclei.astype(self.dtype))[0][:2] + ((1, 0, 0),)]
 
 
-def run_cellpose(image: Path, tiff_out: Path, channel_cell: int, channel_nuc: int = None, *,
-                 model_type: str = None, table_out: Path = None,
+def run_cellpose(image: Path | str, tiff_out: Path | str, channel_cell: int, channel_nuc: int = None, *,
+                 model_type: str = None, table_out: Path | str = None,
                  cp_kwargs: dict[str, str] = None, tm_kwargs: dict[str, str] = None) -> None:
     cp_kwargs = cp_kwargs or {}
     tm_kwargs = tm_kwargs or {}
@@ -317,8 +317,8 @@ class FindCellsTiff(IJTiffFile):
                 super().compress_frame(nucleus.astype(self.dtype)[0][:2] + ((1, 0, 0),))]
 
 
-def run_findcells(image: Path, tiff_out: Path, channel_cell: int, channel_nuc: int = None, *,
-                  table_out: Path = None, fc_kwargs: dict[str, str] = None, tm_kwargs: dict[str, str] = None) -> None:
+def run_findcells(image: Path | str, tiff_out: Path | str, channel_cell: int, channel_nuc: int = None, *,
+                  table_out: Path | str = None, fc_kwargs: dict[str, str] = None, tm_kwargs: dict[str, str] = None) -> None:
     fc_kwargs = fc_kwargs or {}
     tm_kwargs = tm_kwargs or {}
     fc_kwargs = filter_kwargs(findcells, fc_kwargs)
@@ -356,7 +356,7 @@ class PreTrackTiff(IJTiffFile):
         return super().compress_frame(frame.astype(self.dtype))
 
 
-def run_pre_track(image: Path, tiff_out: Path, pre_track: pandas.DataFrame, radius: float) -> None:
+def run_pre_track(image: Path | str, tiff_out: Path | str, pre_track: pandas.DataFrame, radius: float) -> None:
     dtype = 'uint8' if pre_track['cell'].max() < 255 else 'uint16'
     with Imread(image) as im:
         with PreTrackTiff(im.shape['yx'], radius, tiff_out, (1, 1, im.shape['t']),  # noqa
