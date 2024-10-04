@@ -10,17 +10,17 @@ from dataclasses import dataclass
 from datetime import datetime
 from functools import wraps
 from glob import glob
-from inspect import getfile, Parameter, signature
+from inspect import Parameter, getfile, signature
 from pathlib import Path
 from shutil import copyfile
 from traceback import format_exc, print_exception
 from typing import Any, Callable, Hashable, Sequence, TypeVar
 
-from bidict import bidict
 import makefun
 import numpy as np
 import pandas
 import regex
+from bidict import bidict
 from IPython import embed
 from ruamel import yaml
 

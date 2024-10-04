@@ -314,7 +314,7 @@ class FindCellsTiff(IJTiffFile):
     def compress_frame(self, frame: tuple[ArrayLike]) -> Sequence[FrameInfo]:
         cell, nucleus = findcells(*frame, **self.fc_kwargs)
         return [super().compress_frame(cell.astype(self.dtype))[0],
-                super().compress_frame(nucleus.astype(self.dtype)[0][:2] + ((1, 0, 0),))]
+                super().compress_frame(nucleus.astype(self.dtype))[0][:2] + ((1, 0, 0),)]
 
 
 def run_findcells(image: Path | str, tiff_out: Path | str, channel_cell: int, channel_nuc: int = None, *,

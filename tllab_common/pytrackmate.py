@@ -4,7 +4,6 @@ import xml.etree.cElementTree as et
 import numpy as np
 import pandas as pd
 
-
 """ 
     Copyright (c) 2018, Hadrien Mary
     All rights reserved.
