@@ -351,7 +351,7 @@ class PreTrackTiff(IJTiffFile):
             dist = np.round(np.min([(self.yv - i[1]) ** 2 + (self.xv - i[2]) ** 2 for i in cxy], 0)).astype(int)
 
             for i in cxy:
-                frame[*np.round(i[1:]).astype(int)] = i[0]  # noqa
+                frame[int(i[1]), int(i[2])] = i[0]  # noqa
             frame = watershed(dist, frame, mask=dist < self.radius ** 2)
         return super().compress_frame(frame.astype(self.dtype))
 

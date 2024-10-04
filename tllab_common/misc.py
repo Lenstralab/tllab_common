@@ -57,48 +57,10 @@ def wraps_combine(wrapper: Callable[[Any, ...], Any] | type, ignore: Sequence[st
     if ignore is None:
         ignore = []
 
+    class WrapsException(Exception):
+        pass
+
     def wrap(wrapped: Callable[[Any, ...], R]) -> Callable[[Any, ...], R]:
-        sig_wrapper = signature(wrapper.__init__ if isinstance(wrapper, type) else wrapper)
-        sig_wrapped = signature(wrapped.__init__ if isinstance(wrapped, type) else wrapped)
-        z = [(p, p.name, p.kind) for p in sig_wrapped.parameters.values()]
-        p1, n1, k1 = zip(*z) if len(z) else ((), (), ())
-        z = [(p, p.name, p.kind) for p in sig_wrapper.parameters.values()
-             if (p.kind in (Parameter.VAR_POSITIONAL, Parameter.VAR_KEYWORD) or p.name not in n1) and
-             p.name not in ignore]
-        p0, n0, k0 = zip(*z) if len(z) else ((), (), ())
-
-        idx0a = k0.index(Parameter.VAR_POSITIONAL) if Parameter.VAR_POSITIONAL in k0 else None
-        idx0k = k0.index(Parameter.VAR_KEYWORD) if Parameter.VAR_KEYWORD in k0 else None
-        idx1a = k1.index(Parameter.VAR_POSITIONAL) if Parameter.VAR_POSITIONAL in k1 else None
-        idx1k = k1.index(Parameter.VAR_KEYWORD) if Parameter.VAR_KEYWORD in k1 else None
-
-        if idx1a is not None:
-            if idx0a:
-                new_parameters = [Parameter(p.name, p.kind, annotation=p.annotation) for p in p1[:idx1a]]
-            else:
-                new_parameters = list(p1[:idx1a])
-            if len(new_parameters) == 0 or new_parameters[-1].default == Parameter.empty:
-                new_parameters.extend(p0[:idx0k])
-            else:
-                new_parameters.extend([Parameter(p.name, p.kind,
-                                                 default='empty' if p.default == Parameter.empty else p.default,
-                                                 annotation=p.annotation)
-                                       for p in p0[:idx0k]])
-            new_parameters.extend(p1[idx1a + 1:idx1k])
-        elif idx1k is not None:
-            if idx0a is not None:
-                new_parameters = list(p1[:idx1k])
-            else:
-                new_parameters = [Parameter(p.name, p.kind, annotation=p.annotation) for p in p1[:idx1k]]
-            new_parameters.extend([Parameter(p.name, Parameter.KEYWORD_ONLY,
-                                             default='empty' if p.default == Parameter.empty else p.default,
-                                             annotation=p.annotation)
-                                   for p in p0[:(idx0k if idx0a is None else idx0a)]])
-        else:
-            new_parameters = list(p1)
-        if idx0k is not None:
-            new_parameters.append(p0[idx0k])
-
         if wrapped.__doc__ and wrapper.__doc__:
             doc = f"{wrapped.__doc__}\n\nwrapping {wrapper.__name__}:\n\n{wrapper.__doc__.lstrip(' ')}"
         elif wrapped.__doc__:
@@ -108,9 +70,66 @@ def wraps_combine(wrapper: Callable[[Any, ...], Any] | type, ignore: Sequence[st
         else:
             doc = None
 
-        @makefun.wraps(wrapped, new_sig=sig_wrapper.replace(parameters=new_parameters), doc=doc)
-        def fun(*args: Any, **kwargs: Any) -> R:
-            return wrapped(*args, **kwargs)
+        try:
+            try:
+                sig_wrapper = signature(wrapper.__init__ if isinstance(wrapper, type) else wrapper)
+                sig_wrapped = signature(wrapped.__init__ if isinstance(wrapped, type) else wrapped)
+            except ValueError:
+                raise WrapsException
+            z = [(p, p.name, p.kind) for p in sig_wrapped.parameters.values()]
+            p1, n1, k1 = zip(*z) if len(z) else ((), (), ())
+            z = [(p, p.name, p.kind) for p in sig_wrapper.parameters.values()
+                 if (p.kind in (Parameter.VAR_POSITIONAL, Parameter.VAR_KEYWORD) or p.name not in n1) and
+                 p.name not in ignore]
+            p0, n0, k0 = zip(*z) if len(z) else ((), (), ())
+
+            idx0a = k0.index(Parameter.VAR_POSITIONAL) if Parameter.VAR_POSITIONAL in k0 else None
+            idx0k = k0.index(Parameter.VAR_KEYWORD) if Parameter.VAR_KEYWORD in k0 else None
+            idx1a = k1.index(Parameter.VAR_POSITIONAL) if Parameter.VAR_POSITIONAL in k1 else None
+            idx1k = k1.index(Parameter.VAR_KEYWORD) if Parameter.VAR_KEYWORD in k1 else None
+
+            if idx1a is not None:
+                if idx0a:
+                    new_parameters = [Parameter(p.name, p.kind, annotation=p.annotation) for p in p1[:idx1a]]
+                else:
+                    new_parameters = list(p1[:idx1a])
+                if len(new_parameters) == 0 or new_parameters[-1].default == Parameter.empty:
+                    new_parameters.extend(p0[:idx0k])
+                else:
+                    new_parameters.extend([Parameter(p.name, p.kind,
+                                                     default='empty' if p.default == Parameter.empty else p.default,
+                                                     annotation=p.annotation)
+                                           for p in p0[:idx0k]])
+                new_parameters.extend(p1[idx1a + 1:idx1k])
+            elif idx1k is not None:
+                if idx0a is not None:
+                    new_parameters = list(p1[:idx1k])
+                else:
+                    new_parameters = [Parameter(p.name, p.kind, annotation=p.annotation) for p in p1[:idx1k]]
+                new_parameters.extend([Parameter(p.name, Parameter.KEYWORD_ONLY,
+                                                 default='empty' if p.default == Parameter.empty else p.default,
+                                                 annotation=p.annotation)
+                                       for p in p0[:(idx0k if idx0a is None else idx0a)]])
+            else:
+                new_parameters = list(p1)
+            if idx0k is not None:
+                new_parameters.append(p0[idx0k])
+
+            @makefun.wraps(wrapped, new_sig=sig_wrapper.replace(parameters=new_parameters), doc=doc)
+            def fun(*args: Any, **kwargs: Any) -> R:
+                return wrapped(*args, **kwargs)
+
+        except WrapsException:
+            @makefun.wraps(wrapped, doc=doc)
+            def fun(*args: Any, **kwargs: Any) -> R:
+                return wrapped(*args, **kwargs)
+
+        except Exception:  # noqa
+            warnings.warn(f'Exception annotating function {wrapped.__name__}:\n\n{format_exc()}')
+
+            @makefun.wraps(wrapped, doc=doc)
+            def fun(*args: Any, **kwargs: Any) -> R:
+                return wrapped(*args, **kwargs)
 
         return fun
 
