@@ -15,7 +15,6 @@ from cellpose import models
 from csbdeep.utils import normalize
 from ndbioimage import Imread
 from numpy.typing import ArrayLike
-from pytrackmate import trackmate_peak_import
 from scipy.interpolate import interp1d
 from scipy.ndimage import distance_transform_edt
 from scipy.spatial.distance import cdist
@@ -24,6 +23,7 @@ from tiffwrite import FrameInfo, IJTiffFile
 from tqdm.auto import tqdm
 
 from .findcells import findcells
+from .pytrackmate import trackmate_peak_import
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 from stardist.models import StarDist2D  # noqa
