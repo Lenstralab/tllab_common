@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import warnings
 from contextlib import redirect_stdout
 from inspect import getfullargspec
 from io import StringIO
@@ -154,28 +155,40 @@ def connect_nuclei_with_cells(nuclei: ArrayLike, cells: ArrayLike) -> np.ndarray
     jaccard = cdist(np.vstack([nuclei_flat == i for i in i_nuclei]).astype(int),
                     np.vstack([cells_flat == i for i in i_cells]).astype(int), 'jaccard')
     idx = np.where(jaccard < 0.95)
-    idx = np.vstack((i_nuclei[idx[0]], i_cells[idx[1]])).T
+    nuclei_lbl, cell_lbl = np.vstack((i_nuclei[idx[0]], i_cells[idx[1]]))
 
-    d = {}
-    for n in np.unique(idx[:, 0]):
-        c_i = set(idx[idx[:, 0] == n, 1])
-        n_i = tuple(np.unique(idx[np.isin(idx[:, 1], tuple(c_i)), 0]))
-        d[n_i] = d.get(n_i, set()) | c_i  # type: ignore
+    d = {}  # find groups of overlapping nuclei and cells
+    for n in np.unique(nuclei_lbl):
+        if not any([n in k for k in d.keys()]):
+            visited_nuclei = set()
+            visited_cells = set()
+            nuclei_set = {n}
+            cell_set = set()
+            while len(nuclei_set - visited_nuclei) or len(cell_set - visited_cells):
+                for i in nuclei_set - visited_nuclei:
+                    cell_set |= set(cell_lbl[nuclei_lbl == i])
+                visited_nuclei |= nuclei_set
+
+                for i in cell_set - visited_cells:
+                    nuclei_set |= set(nuclei_lbl[cell_lbl == i])
+                visited_cells |= cell_set
+            d[tuple(nuclei_set)] = tuple(cell_set)
 
     cells_new = np.zeros_like(cells)
     x, y = np.meshgrid(range(cells.shape[1]), range(cells.shape[0]))
     for n, c in d.items():
         if len(n) == 1:
-            cells_new[np.isin(cells, tuple(c))] = n
+            cells_new[np.isin(cells, c)] = n
         else:
-            mask = np.zeros_like(cells)
-            mask[np.isin(cells, tuple(c))] = 1
+            mask = np.zeros(cells.shape, bool)
+            mask[np.isin(cells, c)] = True
+            mask[np.isin(nuclei, n)] = True
             centers = [get_xy(nuclei == i) for i in n]
             dist = np.min([(x - i[1]) ** 2 + (y - i[0]) ** 2 for i in centers], 0)
             markers = np.zeros_like(cells)
             for i, n_c in zip(centers, n):
                 markers[int(round(i[0])), int(round(i[1]))] = n_c
-            cells_new += watershed(dist, markers=markers, mask=mask)
+            cells_new[mask] = watershed(dist, markers=markers, mask=mask)[mask]
     cells_new[nuclei > 0] = nuclei[nuclei > 0]
     cells_new[np.isin(cells_new, np.setdiff1d(cells_new, nuclei))] = 0
     return cells_new
@@ -264,6 +277,9 @@ def run_stardist(image: Path | str, tiff_out: Path | str, channel_cell: int, *,
 
 
 class CellPoseTiff(IJTiffFile):
+    def __new__(cls, model: models.Cellpose, cp_kwargs: dict[str, str] = None, *args: Any, **kwargs: Any):
+        return super().__new__(cls, *args, **kwargs)
+
     def __init__(self, model: models.Cellpose, cp_kwargs: dict[str, str] = None, *args: Any, **kwargs: Any) -> None:
         self.model = model
         self.cp_kwargs = cp_kwargs or {}
@@ -289,7 +305,9 @@ def run_cellpose(image: Path | str, tiff_out: Path | str, channel_cell: int, cha
                  cp_kwargs: dict[str, str] = None, tm_kwargs: dict[str, str] = None) -> None:
     cp_kwargs = cp_kwargs or {}
     tm_kwargs = tm_kwargs or {}
-    model = models.Cellpose(gpu=False, model_type=model_type)
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        model = models.Cellpose(gpu=False, model_type=model_type)
     cp_kwargs = filter_kwargs(model.eval, cp_kwargs)
 
     with tempfile.TemporaryDirectory() as tempdir:
@@ -307,6 +325,9 @@ def run_cellpose(image: Path | str, tiff_out: Path | str, channel_cell: int, cha
 
 
 class FindCellsTiff(IJTiffFile):
+    def __new__(cls, fc_kwargs: dict[str, str] = None, *args: Any, **kwargs: Any):
+        return super().__new__(cls, *args, **kwargs)
+
     def __init__(self, fc_kwargs: dict[str, str] = None, *args: Any, **kwargs: Any) -> None:
         self.fc_kwargs = fc_kwargs or {}
         super().__init__(*args, **kwargs)
@@ -338,6 +359,9 @@ def run_findcells(image: Path | str, tiff_out: Path | str, channel_cell: int, ch
 
 
 class PreTrackTiff(IJTiffFile):
+    def __new__(cls, shape_yx: tuple[int, int], radius: float, *args: Any, **kwargs: Any):
+        return super().__new__(cls, *args, **kwargs)
+
     def __init__(self, shape_yx: tuple[int, int], radius: float, *args: Any, **kwargs: Any) -> None:
         self.shape_yx = shape_yx
         self.xv, self.yv = np.meshgrid(*[range(i) for i in shape_yx])
