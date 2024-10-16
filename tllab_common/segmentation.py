@@ -20,7 +20,7 @@ from scipy.interpolate import interp1d
 from scipy.ndimage import distance_transform_edt
 from scipy.spatial.distance import cdist
 from skimage.segmentation import watershed
-from tiffwrite import FrameInfo, IJTiffFile
+from tiffwrite import FrameInfo, IJTiffFile, IJTiffParallel
 from tqdm.auto import tqdm
 
 from .findcells import findcells
@@ -276,28 +276,24 @@ def run_stardist(image: Path | str, tiff_out: Path | str, channel_cell: int, *,
         trackmate(tif_file, tiff_out, table_out, **tm_kwargs)
 
 
-class CellPoseTiff(IJTiffFile):
-    def __new__(cls, model: models.Cellpose, cp_kwargs: dict[str, str] = None, *args: Any, **kwargs: Any):
-        return super().__new__(cls, *args, **kwargs)
-
+class CellPoseTiff(IJTiffParallel):
     def __init__(self, model: models.Cellpose, cp_kwargs: dict[str, str] = None, *args: Any, **kwargs: Any) -> None:
         self.model = model
         self.cp_kwargs = cp_kwargs or {}
         super().__init__(*args, **kwargs)
 
-    def compress_frame(self, frame: tuple[ArrayLike]) -> Sequence[FrameInfo]:
+    def parallel(self, frame: tuple[ArrayLike]) -> tuple[FrameInfo]:
         if len(frame) == 1:
             cells = self.model.eval(np.stack(frame, 0), channel_axis=0, channels=[[0, 0]],  # noqa
                                             **self.cp_kwargs)[0]
-            return super().compress_frame(cells.astype(self.dtype))
+            return (cells, 0, 0, 0),
         else:
             cells = self.model.eval(np.stack(frame, 0), channel_axis=0, channels=[[1, 0]],  # noqa
                                     **self.cp_kwargs)[0]
             nuclei = self.model.eval(np.stack(frame, 0), channel_axis=0, channels=[[2, 0]],  # noqa
                                      **self.cp_kwargs)[0]
             cells = connect_nuclei_with_cells(nuclei, cells)
-            return [super().compress_frame(cells.astype(self.dtype))[0],
-                    super().compress_frame(nuclei.astype(self.dtype))[0][:2] + ((1, 0, 0),)]
+            return (cells, 0, 0, 0), (nuclei, 1, 0, 0)
 
 
 def run_cellpose(image: Path | str, tiff_out: Path | str, channel_cell: int, channel_nuc: int = None, *,
@@ -324,18 +320,14 @@ def run_cellpose(image: Path | str, tiff_out: Path | str, channel_cell: int, cha
         trackmate(tif_file, tiff_out, table_out, **tm_kwargs)
 
 
-class FindCellsTiff(IJTiffFile):
-    def __new__(cls, fc_kwargs: dict[str, str] = None, *args: Any, **kwargs: Any):
-        return super().__new__(cls, *args, **kwargs)
-
+class FindCellsTiff(IJTiffParallel):
     def __init__(self, fc_kwargs: dict[str, str] = None, *args: Any, **kwargs: Any) -> None:
         self.fc_kwargs = fc_kwargs or {}
         super().__init__(*args, **kwargs)
 
-    def compress_frame(self, frame: tuple[ArrayLike]) -> Sequence[FrameInfo]:
+    def parallel(self, frame: tuple[ArrayLike]) -> tuple[FrameInfo]:
         cell, nucleus = findcells(*frame, **self.fc_kwargs)
-        return [super().compress_frame(cell.astype(self.dtype))[0],
-                super().compress_frame(nucleus.astype(self.dtype))[0][:2] + ((1, 0, 0),)]
+        return (cell, 0, 0, 0), (nucleus, 1, 0, 0)
 
 
 def run_findcells(image: Path | str, tiff_out: Path | str, channel_cell: int, channel_nuc: int = None, *,
@@ -358,17 +350,14 @@ def run_findcells(image: Path | str, tiff_out: Path | str, channel_cell: int, ch
         trackmate(tif_file, tiff_out, table_out, **tm_kwargs)
 
 
-class PreTrackTiff(IJTiffFile):
-    def __new__(cls, shape_yx: tuple[int, int], radius: float, *args: Any, **kwargs: Any):
-        return super().__new__(cls, *args, **kwargs)
-
+class PreTrackTiff(IJTiffParallel):
     def __init__(self, shape_yx: tuple[int, int], radius: float, *args: Any, **kwargs: Any) -> None:
         self.shape_yx = shape_yx
         self.xv, self.yv = np.meshgrid(*[range(i) for i in shape_yx])
         self.radius = radius
         super().__init__(*args, **kwargs)
 
-    def compress_frame(self, cxy: tuple[np.ndarray]) -> Sequence[FrameInfo]:
+    def parallel(self, cxy: tuple[np.ndarray]) -> tuple[FrameInfo]:
         frame = np.zeros(self.shape_yx, int)
         cxy = cxy[0]
         if len(cxy):
@@ -377,7 +366,7 @@ class PreTrackTiff(IJTiffFile):
             for i in cxy:
                 frame[int(i[1]), int(i[2])] = i[0]  # noqa
             frame = watershed(dist, frame, mask=dist < self.radius ** 2)
-        return super().compress_frame(frame.astype(self.dtype))
+        return (frame, 0, 0, 0),
 
 
 def run_pre_track(image: Path | str, tiff_out: Path | str, pre_track: pandas.DataFrame, radius: float) -> None:

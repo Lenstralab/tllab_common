@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "tllab_common"
-version = "2024.10.5"
+version = "2024.10.6"
 description = "Common code for the Lenstra lab."
 authors = ["Lenstra lab NKI <t.lenstra@nki.nl>"]
 license = "GPLv3"
@@ -30,7 +30,7 @@ pyimagej = "*"
 scyjava = "*"
 parfor = "*"
 ndbioimage = ">=2024.7.0"
-tiffwrite = ">=2024.10.1"
+tiffwrite = ">=2024.10.6"
 pytest = { version = "*", optional = true }
 
 [tool.poetry.extras]
