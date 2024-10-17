@@ -239,7 +239,7 @@ def trackmate(tif_file: Path | str, tiff_out: Path | str, table_out: Path | str 
         # relabel the labels according to the tracks and also add missing labels by interpolation
         im.frame_decorator = SwapLabels(tracks, min_frames)
         dtype = 'uint8' if im.frame_decorator.tracks['label'].max() <= 255 else 'uint16'
-        with IJTiffFile(tiff_out, (im.shape['c'], 1, im.shape['t']), pxsize=im.pxsize_um,
+        with IJTiffFile(tiff_out, pxsize=im.pxsize_um,
                         colormap='glasbey', dtype=dtype) as tif:
             for c, t in tqdm(product(range(im.shape['c']), range(im.shape['t'])),
                              total=im.shape['c'] * im.shape['t'],
@@ -268,7 +268,7 @@ def run_stardist(image: Path | str, tiff_out: Path | str, channel_cell: int, *,
         tif_file = Path(tempdir) / 'tm.tif'
 
         with Imread(image, axes='ctyx') as im:
-            with IJTiffFile(tif_file, (1, 1, im.shape['t']), pxsize=im.pxsize_um) as tif:
+            with IJTiffFile(tif_file, pxsize=im.pxsize_um) as tif:
                 for t in tqdm(range(im.shape['t']), total=im.shape['t'], desc='running stardist',
                               disable=im.shape['t'] < 10):
                     tif.save(model.predict_instances(normalize(im[channel_cell, t]))[0], 0, 0, t)
@@ -282,7 +282,7 @@ class CellPoseTiff(IJTiffParallel):
         self.cp_kwargs = cp_kwargs or {}
         super().__init__(*args, **kwargs)
 
-    def parallel(self, frame: tuple[ArrayLike]) -> tuple[FrameInfo]:
+    def parallel(self, frame: tuple[ArrayLike]) -> tuple[FrameInfo, ...]:
         if len(frame) == 1:
             cells = self.model.eval(np.stack(frame, 0), channel_axis=0, channels=[[0, 0]],  # noqa
                                             **self.cp_kwargs)[0]
@@ -310,7 +310,7 @@ def run_cellpose(image: Path | str, tiff_out: Path | str, channel_cell: int, cha
         tif_file = Path(tempdir) / 'tm.tif'
 
         with Imread(image, axes='ctyx') as im:
-            with CellPoseTiff(model, cp_kwargs, tif_file, (1 if channel_nuc is None else 2, 1, im.shape['t']),
+            with CellPoseTiff(model, cp_kwargs, tif_file,
                               pxsize=im.pxsize_um) as tif:
                 for t in tqdm(range(im.shape['t']), total=im.shape['t'], desc='running cellpose',
                               disable=im.shape['t'] < 10):
@@ -325,7 +325,7 @@ class FindCellsTiff(IJTiffParallel):
         self.fc_kwargs = fc_kwargs or {}
         super().__init__(*args, **kwargs)
 
-    def parallel(self, frame: tuple[ArrayLike]) -> tuple[FrameInfo]:
+    def parallel(self, frame: tuple[ArrayLike]) -> tuple[FrameInfo, FrameInfo]:
         cell, nucleus = findcells(*frame, **self.fc_kwargs)
         return (cell, 0, 0, 0), (nucleus, 1, 0, 0)
 
@@ -340,7 +340,7 @@ def run_findcells(image: Path | str, tiff_out: Path | str, channel_cell: int, ch
         tif_file = Path(tempdir) / 'tm.tif'
 
         with Imread(image, axes='ctyx') as im:
-            with FindCellsTiff(fc_kwargs, tif_file, (2, 1, im.shape['t']), pxsize=im.pxsize_um) as tif:
+            with FindCellsTiff(fc_kwargs, tif_file, pxsize=im.pxsize_um) as tif:
                 for t in tqdm(range(im.shape['t']), total=im.shape['t'], desc='running findcells',
                               disable=im.shape['t'] < 10):
                     assert channel_cell is not None, 'channel_cell cannot be None'
@@ -372,7 +372,7 @@ class PreTrackTiff(IJTiffParallel):
 def run_pre_track(image: Path | str, tiff_out: Path | str, pre_track: pandas.DataFrame, radius: float) -> None:
     dtype = 'uint8' if pre_track['cell'].max() < 255 else 'uint16'
     with Imread(image) as im:
-        with PreTrackTiff(im.shape['yx'], radius, tiff_out, (1, 1, im.shape['t']),  # noqa
+        with PreTrackTiff(im.shape['yx'], radius, tiff_out,  # noqa
                           pxsize=im.pxsize_um, colormap='glasbey', dtype=dtype) as tif:
             for t in tqdm(range(im.shape['t']), total=im.shape['t'], desc='running pre track cell masking',
                           disable=im.shape['t'] < 10):
