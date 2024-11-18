@@ -1,8 +1,8 @@
-from typing import Any, Callable, Optional, Sequence
 import operator as op
+from typing import Any, Callable, Optional, Sequence
+
 import polars as pl
 import pyparsing as pp
-
 
 __all__ = ['query']
 

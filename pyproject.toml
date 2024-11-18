@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "tllab_common"
-version = "2024.11.0"
+version = "2024.11.1"
 description = "Common code for the Lenstra lab."
 authors = ["Lenstra lab NKI <t.lenstra@nki.nl>"]
 license = "GPLv3"
@@ -22,6 +22,7 @@ pandas  = "*"
 parfor = "*"
 polars = "*"
 pyimagej = "*"
+pyparsing = "*"
 regex = "*"
 roifile = "*"
 "ruamel.yaml" = "*"
