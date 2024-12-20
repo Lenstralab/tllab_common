@@ -1,4 +1,3 @@
-import re
 import xml.etree.cElementTree as et
 
 import numpy as np
@@ -98,7 +97,6 @@ def trackmate_peak_import(trackmate_xml_path, get_tracks=False):
                              value=float(spot_filter.get('value')),
                              isabove=True if spot_filter.get('isabove') == 'true' else False)
 
-    trajs.columns = [re.sub(r'_CH\d', '', column) for column in trajs.columns]
     trajs.rename(columns=object_labels, inplace=True)
     trajs.columns = [column.lower() for column in trajs.columns]
     trajs['label'] = np.arange(trajs.shape[0])

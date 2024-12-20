@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 import warnings
 from contextlib import redirect_stdout
@@ -220,14 +221,17 @@ def trackmate(tif_file: Path | str, tiff_out: Path | str, table_out: Path | str 
 
     with Imread(tif_file, axes='ctyx', dtype=int) as im:
         if im.shape['t'] > 1:
+            pat = re.compile(r'_ch1', re.IGNORECASE)
             xml_file = tif_file.with_suffix('.xml')
-            trackmate_fiji(tif_file, xml_file, channel=im.shape['c'], **kwargs)
+            trackmate_fiji(tif_file, xml_file, channel=1, **kwargs)
             tracks = trackmate_peak_import(str(xml_file), get_tracks=True)
+            tracks.columns = [pat.sub('', column) for column in tracks.columns]
+            tracks = tracks[['t', 't_stamp', 'x', 'y', 'label', 'median_intensity', 'area']]
             missing = interpolate_missing(tracks)
             tracks = substitute_missing(tracks, missing)
             tracks = sort_labels(tracks)
             missing = interpolate_missing(tracks)
-            tracks = pandas.concat((tracks, missing), ignore_index=True)
+            tracks = pandas.concat((tracks, missing), ignore_index=True)[['label', 'median_intensity', 't']]
         else:
             cells = np.unique(im)
             tracks = pandas.DataFrame(np.vstack((np.arange(1, len(cells)), cells[cells > 0])).T,
