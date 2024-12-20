@@ -196,9 +196,9 @@ def connect_nuclei_with_cells(nuclei: ArrayLike, cells: ArrayLike) -> np.ndarray
 
 def trackmate_fiji(file_in: Path | str, file_out: Path | str, fiji_path: Path | str = None,
                    channel: int = 0, **kwargs: dict[str, [str, int, float, bool]]) -> None:
-    if fiji_path is None:
-        fiji_path = Path('/DATA/opt/Fiji.app')
-    if fiji_path.exists():
+    if fiji_path is not None:
+        fiji_path = Path(fiji_path)
+    if fiji_path is not None and fiji_path.exists():
         ij = imagej.init(str(fiji_path))
     else:
         ij = imagej.init('sc.fiji:fiji')

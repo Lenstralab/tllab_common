@@ -404,6 +404,7 @@ class SliceKeepSize:
 
 class Data(metaclass=ABCMeta):
     params = None
+    do_not_pickle = ()
     channels: bidict
     colors: bidict
 
