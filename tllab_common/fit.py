@@ -224,10 +224,13 @@ class Exponential2(Fit):
             return A, a, tau_0, tau_1
         """
         n = len(self.x) // 2
-        y0 = np.nanmax(self.y)
-        q = Exponential1(self.x[n:], self.y[n:] / y0).p0
-        return [np.clip(value, *bound)
-                for value, bound in zip((y0, 1 - q[0], q[1] / 3, q[1]), self.bounds)]
+        if n == 0:
+            return [np.nan, np.nan, np.nan, np.nan]
+        else:
+            y0 = np.nanmax(self.y)
+            q = Exponential1(self.x[n:], self.y[n:] / y0).p0
+            return [np.clip(value, *bound)
+                    for value, bound in zip((y0, 1 - q[0], q[1] / 3, q[1]), self.bounds)]
 
     @staticmethod
     def fun(p: ArrayLike, x: Number | ArrayLike) -> ArrayLike:
@@ -250,10 +253,13 @@ class Exponential3(Fit):
             return A, a, b, tau_0, tau_1, tau_2
         """
         n = len(self.x) // 2
-        y0 = np.nanmax(self.y)
-        q = Exponential2(self.x[n:], self.y[n:] / y0).p0
-        return [np.clip(value, *bound)
-                for value, bound in zip((y0, 0.3, 0.3, q[2] / 3, q[3] / 3, q[3]), self.bounds)]
+        if n == 0:
+            return [np.nan, np.nan, np.nan, np.nan, np.nan]
+        else:
+            y0 = np.nanmax(self.y)
+            q = Exponential2(self.x[n:], self.y[n:] / y0).p0
+            return [np.clip(value, *bound)
+                    for value, bound in zip((y0, 0.3, 0.3, q[2] / 3, q[3] / 3, q[3]), self.bounds)]
 
     @staticmethod
     def fun(p: ArrayLike, x: Number | ArrayLike) -> ArrayLike:
