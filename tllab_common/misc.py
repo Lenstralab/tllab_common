@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import pickle
+import py
 import re
 import sys
 import warnings
@@ -35,6 +38,18 @@ Number = int | float | complex
 
 
 R = TypeVar('R')
+
+
+@contextlib.contextmanager
+def capture_stderr():
+    with contextlib.redirect_stderr(io.StringIO()):
+        try:
+            capture = py.io.StdCaptureFD(out=False, err=True, in_=False)  # noqa
+            yield capture
+        except Exception:
+            raise Exception
+        finally:
+            capture.reset()
 
 
 def wraps_combine(wrapper: Callable[[Any, ...], Any] | type, ignore: Sequence[str] = None) -> Callable[[Any, ...], R]:

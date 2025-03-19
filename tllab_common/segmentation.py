@@ -1,34 +1,43 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 import tempfile
 import warnings
 from contextlib import redirect_stdout
+from functools import wraps
 from inspect import getfullargspec
 from io import StringIO
-from itertools import product
 from pathlib import Path
 from typing import Any, Callable, Sequence
+
+from .misc import capture_stderr
+
+with capture_stderr():
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+    import tensorflow
+    logger = tensorflow.get_logger()
+    logger.setLevel(logging.ERROR)
 
 import numpy as np
 import pandas
 from cellpose import models
 from csbdeep.utils import normalize
+from keras.src.backend.jax.numpy import zeros_like
 from ndbioimage import Imread
 from numpy.typing import ArrayLike
 from scipy.interpolate import interp1d
 from scipy.ndimage import distance_transform_edt
 from scipy.spatial.distance import cdist
 from skimage.segmentation import watershed
+from stardist.models import StarDist2D  # noqa
 from tiffwrite import FrameInfo, IJTiffFile, IJTiffParallel
-from tqdm.auto import tqdm
+from tqdm.auto import tqdm, trange
 
 from .findcells import findcells
 from .pytrackmate import trackmate_peak_import
 
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-from stardist.models import StarDist2D  # noqa
 
 try:
     import imagej
@@ -69,7 +78,7 @@ class SwapLabels:
     def __init__(self, tracks: pandas.DataFrame, min_frames: int = None) -> None:
         if min_frames:
             tracks = tracks.groupby('label').apply(lambda df: df.assign(n_frames=len(df))).query(
-                f'n_frames > @min_frames', local_dict=dict(min_frames=min_frames)).reset_index(drop=True)
+                'n_frames > @min_frames', local_dict=dict(min_frames=min_frames)).reset_index(drop=True)
         # ensure that labels are consecutive
         if not tracks.empty:
             d = {u: i for i, u in enumerate(tracks['label'].unique(), 1)}
@@ -122,7 +131,7 @@ def interpolate_missing(tracks: pandas.DataFrame, t_len: int = None) -> pandas.D
 def substitute_missing(tracks: pandas.DataFrame, missing: pandas.DataFrame, distance: int = 1) -> pandas.DataFrame:
     """ relabel rows in tracks if they overlap with a row in missing """
     for _, row in missing.iterrows():
-        a = tracks.query(f't==@t & (x-@x)**2 + (y-@y)**2 < @distance',
+        a = tracks.query('t==@t & (x-@x)**2 + (y-@y)**2 < @distance',
                          local_dict=dict(t=row['t'], x=row['x'], y=row['y'], distance=distance)).copy()
         a['label'] = row['label']
         if len(a) == 1:
@@ -150,6 +159,8 @@ def connect_nuclei_with_cells(nuclei: ArrayLike, cells: ArrayLike) -> np.ndarray
     cells = np.asarray(cells)
     i_nuclei = np.array([i for i in np.unique(nuclei) if i > 0])
     i_cells = np.array([i for i in np.unique(cells) if i > 0])
+    if len(i_nuclei) == 0 | len(i_cells) == 0:
+        return zeros_like(cells)
     j = (nuclei.flatten()) > 0 | (cells.flatten() > 0)
     nuclei_flat = nuclei.flatten()[j]
     cells_flat = cells.flatten()[j]
@@ -215,9 +226,11 @@ def trackmate_fiji(file_in: Path | str, file_out: Path | str, fiji_path: Path | 
 
 
 def trackmate(tif_file: Path | str, tiff_out: Path | str, table_out: Path | str = None, min_frames: int = None,
-              **kwargs: dict[str, str]) -> None:
+              remove_borders: bool = False, **kwargs: dict[str, str]) -> None:
     """ run trackmate to make sure cells have the same label in all frames, relabel even if there's just one frame,
-        to make sure that cell numbers are consecutive """
+        to make sure that cell numbers are consecutive
+        also remove cells/nuclei touching the border of the image if needed (only if not a time-lapse)
+    """
 
     with Imread(tif_file, axes='ctyx', dtype=int) as im:
         if im.shape['t'] > 1:
@@ -245,19 +258,28 @@ def trackmate(tif_file: Path | str, tiff_out: Path | str, table_out: Path | str 
         dtype = 'uint8' if im.frame_decorator.tracks['label'].max() <= 255 else 'uint16'
         with IJTiffFile(tiff_out, pxsize=im.pxsize_um,
                         colormap='glasbey', dtype=dtype) as tif:
-            for c, t in tqdm(product(range(im.shape['c']), range(im.shape['t'])),
-                             total=im.shape['c'] * im.shape['t'],
-                             desc='reordering cells with trackmate', leave=False):
-                frame = np.asarray(im[c, t])
-                if missing is not None:
-                    missing_t = missing.query('t==@t', local_dict=dict(t=t))
-                    for cell in missing_t['label'].unique():
-                        time_points = get_time_points(t, missing.query('label==@cell',
-                                                                       local_dict=dict(cell=cell))['t'].tolist())
-                        a = interp_label(t, time_points, [im[c, i] for i in time_points], int(cell), frame > 0)
-                        frame += a
-                # TODO: transforms
-                tif.save(frame, c, 0, t)
+            for t in trange(im.shape['t'], desc='reordering cells with trackmate', leave=False):
+                frame = np.asarray(im[:, t])
+                for c in range(im.shape['c']):
+                    if missing is not None:
+                        missing_t = missing.query('t==@t', local_dict=dict(t=t))
+                        for cell in missing_t['label'].unique():
+                            time_points = get_time_points(t, missing.query('label==@cell',
+                                                                           local_dict=dict(cell=cell))['t'].tolist())
+                            a = interp_label(t, time_points, [im[c, i] for i in time_points], int(cell), frame[c] > 0)
+                            frame[c] += a
+                if remove_borders and im.shape['t'] == 1:
+                    for lbl in np.unique(np.hstack((frame[:, :, 0], frame[:, :, -1], frame[:, 0, :], frame[:, -1, :]))):
+                        frame[frame == lbl] = 0
+                    lbls = np.unique(frame)
+                    lbls = lbls[lbls > 0]
+                    frame_orig = frame.copy()
+                    for i, j in enumerate(lbls):
+                        frame[frame_orig == j] = i
+
+                for c in range(frame.shape[0]):
+                    # TODO: transforms
+                    tif.save(frame[c], c, 0, t)
 
 
 def run_stardist(image: Path | str, tiff_out: Path | str, channel_cell: int, *,
@@ -300,9 +322,9 @@ class CellPoseTiff(IJTiffParallel):
             return (cells, 0, 0, 0), (nuclei, 1, 0, 0)
 
 
-def run_cellpose(image: Path | str, tiff_out: Path | str, channel_cell: int, channel_nuc: int = None, *,
-                 model_type: str = None, table_out: Path | str = None,
-                 cp_kwargs: dict[str, str] = None, tm_kwargs: dict[str, str] = None) -> None:
+def run_cellpose_cpu(image: Path | str, tiff_out: Path | str, channel_cell: int, channel_nuc: int = None, *,
+                     model_type: str = None, table_out: Path | str = None,
+                     cp_kwargs: dict[str, str] = None, tm_kwargs: dict[str, str] = None) -> None:
     cp_kwargs = cp_kwargs or {}
     tm_kwargs = tm_kwargs or {}
     with warnings.catch_warnings():
@@ -314,14 +336,54 @@ def run_cellpose(image: Path | str, tiff_out: Path | str, channel_cell: int, cha
         tif_file = Path(tempdir) / 'tm.tif'
 
         with Imread(image, axes='ctyx') as im:
-            with CellPoseTiff(model, cp_kwargs, tif_file,
-                              pxsize=im.pxsize_um) as tif:
+            with CellPoseTiff(model, cp_kwargs, tif_file, pxsize=im.pxsize_um) as tif:
                 for t in tqdm(range(im.shape['t']), total=im.shape['t'], desc='running cellpose',
                               disable=im.shape['t'] < 10):
                     tif.save((im[channel_cell, t],) if channel_nuc is None else
                              (im[channel_cell, t], im[channel_nuc, t]), 0, 0, t)
 
         trackmate(tif_file, tiff_out, table_out, **tm_kwargs)
+
+
+def run_cellpose_gpu(image: Path | str, tiff_out: Path | str, channel_cell: int, channel_nuc: int = None, *,
+                     model_type: str = None, table_out: Path | str = None,
+                     cp_kwargs: dict[str, str] = None, tm_kwargs: dict[str, str] = None) -> None:
+    cp_kwargs = cp_kwargs or {}
+    tm_kwargs = tm_kwargs or {}
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        model = models.Cellpose(gpu=True, model_type=model_type)
+    cp_kwargs = filter_kwargs(model.eval, cp_kwargs)
+    with tempfile.TemporaryDirectory() as tempdir:
+        tif_file = Path(tempdir) / 'tm.tif'
+
+        with Imread(image, axes='ctyx') as im:
+            with IJTiffFile(tif_file, pxsize=im.pxsize_um) as tif:
+                for t in tqdm(range(im.shape['t']), total=im.shape['t'], desc='running cellpose',
+                              disable=im.shape['t'] < 10):
+                    if channel_nuc is None:
+                        frame = np.stack((im[channel_cell, t],), 0)
+                        cells = model.eval(frame, channel_axis=0, channels=[[0, 0]], **cp_kwargs)[0]  # noqa
+                        tif.save(cells, 0, 0, t)
+                    else:
+                        frame = np.stack((im[channel_cell, t], im[channel_nuc, t]), 0)
+                        cells = model.eval(np.stack(frame, 0), channel_axis=0, channels=[[1, 0]],  # noqa
+                                           **cp_kwargs)[0]
+                        nuclei = model.eval(np.stack(frame, 0), channel_axis=0, channels=[[2, 0]],  # noqa
+                                            **cp_kwargs)[0]
+                        cells = connect_nuclei_with_cells(nuclei, cells)
+                        tif.save(cells, 0, 0, t)
+                        tif.save(nuclei, 1, 0, t)
+
+        trackmate(tif_file, tiff_out, table_out, **tm_kwargs)
+
+
+@wraps(run_cellpose_cpu)
+def run_cellpose(*args, **kwargs) -> None:
+    if len(tensorflow.config.list_physical_devices('GPU')):
+        run_cellpose_gpu(*args, **kwargs)
+    else:
+        run_cellpose_cpu(*args, **kwargs)
 
 
 class FindCellsTiff(IJTiffParallel):
