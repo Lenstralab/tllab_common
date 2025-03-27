@@ -24,7 +24,6 @@ import numpy as np
 import pandas
 from cellpose import models
 from csbdeep.utils import normalize
-from keras.src.backend.jax.numpy import zeros_like
 from ndbioimage import Imread
 from numpy.typing import ArrayLike
 from scipy.interpolate import interp1d
@@ -160,7 +159,7 @@ def connect_nuclei_with_cells(nuclei: ArrayLike, cells: ArrayLike) -> np.ndarray
     i_nuclei = np.array([i for i in np.unique(nuclei) if i > 0])
     i_cells = np.array([i for i in np.unique(cells) if i > 0])
     if len(i_nuclei) == 0 | len(i_cells) == 0:
-        return zeros_like(cells)
+        return np.zeros_like(cells)
     j = (nuclei.flatten()) > 0 | (cells.flatten() > 0)
     nuclei_flat = nuclei.flatten()[j]
     cells_flat = cells.flatten()[j]
