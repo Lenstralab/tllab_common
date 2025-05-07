@@ -17,10 +17,17 @@ Number = int | float | complex
 class Fit(metaclass=ABCMeta):
     bounds = None
 
-    def __init__(self, x: ArrayLike, y: ArrayLike,
-                 w: [ArrayLike, None] = None, s: [ArrayLike, None] = None,
-                 fit_window: Sequence[float] = None, log_scale: bool = False, fit_s: bool = True,
-                 p0: ArrayLike = None) -> None:
+    def __init__(
+        self,
+        x: ArrayLike,
+        y: ArrayLike,
+        w: [ArrayLike, None] = None,
+        s: [ArrayLike, None] = None,
+        fit_window: Sequence[float] = None,
+        log_scale: bool = False,
+        fit_s: bool = True,
+        p0: ArrayLike = None,
+    ) -> None:
         x = np.asarray(x)
         y = np.asarray(y)
         w = np.ones_like(x) if w is None else np.asarray(w)
@@ -59,7 +66,7 @@ class Fit(metaclass=ABCMeta):
         pass
 
     def dfun(self, p: ArrayLike, x: ArrayLike, diffstep: float = 1e-6) -> np.ndarray:
-        """ d fun / dp_i for each p_i in p, this default function will calculate it numerically """
+        """d fun / dp_i for each p_i in p, this default function will calculate it numerically"""
         eps = np.spacing(1)
         deriv = np.zeros((len(p), len(x)))
         f0 = np.asarray(self.fun(p, x))
@@ -78,7 +85,9 @@ class Fit(metaclass=ABCMeta):
             x = np.asarray(x)
         return x.real, self.fun(self.p, x)
 
-    def evaluate_ci(self, x: Number | ArrayLike = None) -> tuple[ArrayLike, ArrayLike, ArrayLike]:
+    def evaluate_ci(
+        self, x: Number | ArrayLike = None
+    ) -> tuple[ArrayLike, ArrayLike, ArrayLike]:
         if x is None:
             x = np.linspace(np.nanmin(self.x), np.nanmax(self.x))
         else:
@@ -91,14 +100,28 @@ class Fit(metaclass=ABCMeta):
         s = self.s if self.fit_s else 1
         eps = np.spacing(0)
         if self.log_scale:
+
             def cost(p: ArrayLike) -> float:
-                with np.errstate(divide='ignore'):
-                    return np.nansum(np.abs(
-                        self.w / s * (np.log(self.y) - np.log(np.clip(self.fun(p, self.x), eps, None))) ** 2))
+                with np.errstate(divide="ignore"):
+                    return np.nansum(
+                        np.abs(
+                            self.w
+                            / s
+                            * (
+                                np.log(self.y)
+                                - np.log(np.clip(self.fun(p, self.x), eps, None))
+                            )
+                            ** 2
+                        )
+                    )
         else:
+
             def cost(p: ArrayLike) -> float:
-                with np.errstate(divide='ignore'):
-                    return np.nansum(np.abs(self.w / s * (self.y - self.fun(p, self.x)) ** 2))
+                with np.errstate(divide="ignore"):
+                    return np.nansum(
+                        np.abs(self.w / s * (self.y - self.fun(p, self.x)) ** 2)
+                    )
+
         return cost
 
     def fit(self) -> Fit:
@@ -107,22 +130,44 @@ class Fit(metaclass=ABCMeta):
 
     @cached_property
     def r(self) -> OptimizeResult:
-        if not hasattr(self, 'p0_manual'):
+        if not hasattr(self, "p0_manual"):
             self.p0_manual = None
-        with np.errstate(divide='ignore'):
+        with np.errstate(divide="ignore"):
             if len(self.x):
-                r = minimize(self.get_cost_fun(), np.asarray(self.p0 if self.p0_manual is None else self.p0_manual),
-                             method='Nelder-Mead', bounds=self.bounds, options=dict(maxiter=400 * self.n_p))
+                r = minimize(
+                    self.get_cost_fun(),
+                    np.asarray(self.p0 if self.p0_manual is None else self.p0_manual),
+                    method="Nelder-Mead",
+                    bounds=self.bounds,
+                    options=dict(maxiter=400 * self.n_p),
+                )
             else:
-                r = OptimizeResult(fun=np.nan, message='Empty data', nfev=0, nit=0, status=1, success=False,
-                                   x=np.full(self.n_p, np.nan))
+                r = OptimizeResult(
+                    fun=np.nan,
+                    message="Empty data",
+                    nfev=0,
+                    nit=0,
+                    status=1,
+                    success=False,
+                    x=np.full(self.n_p, np.nan),
+                )
             if self.log_scale:
                 self.p_ci95, self.r_squared = fminerr(
-                    lambda p, x: np.log(self.fun(p, x)), self.sort(r.x), np.log(self.y), (self.x,), self.w, self.s)
+                    lambda p, x: np.log(self.fun(p, x)),
+                    self.sort(r.x),
+                    np.log(self.y),
+                    (self.x,),
+                    self.w,
+                    self.s,
+                )
             else:
-                self.p_ci95, self.r_squared = fminerr(self.fun, self.sort(r.x), self.y, (self.x,), self.w, self.s)
+                self.p_ci95, self.r_squared = fminerr(
+                    self.fun, self.sort(r.x), self.y, (self.x,), self.w, self.s
+                )
             if self.n - self.n_p - 1 > 0:
-                self.r_squared_adjusted = 1 - (1 - self.r_squared) * (self.n - 1) / (self.n - self.n_p - 1)
+                self.r_squared_adjusted = 1 - (1 - self.r_squared) * (self.n - 1) / (
+                    self.n - self.n_p - 1
+                )
             else:
                 self.r_squared_adjusted = np.nan
             return r
@@ -137,21 +182,24 @@ class Fit(metaclass=ABCMeta):
 
     @property
     def log_likelihood(self) -> float:
-        return -self.n * np.log(2 * np.pi * self.r.fun / (self.n - 1)) / 2 - (self.n - 1) / 2
+        return (
+            -self.n * np.log(2 * np.pi * self.r.fun / (self.n - 1)) / 2
+            - (self.n - 1) / 2
+        )
 
     @property
     def bic(self) -> float:
-        """ Bayesian Information Criterion: the fit with the smallest bic should be the best fit """
+        """Bayesian Information Criterion: the fit with the smallest bic should be the best fit"""
         return self.n_p * np.log(self.n) - 2 * self.log_likelihood
 
     def ftest(self, fit2) -> float:
-        """ returns the p-value for the hypothesis that fit2 is the better fit,
-            assuming fit2 is the fit with more free parameters
-            if the fits are swapped the p-value will be negative """
+        """returns the p-value for the hypothesis that fit2 is the better fit,
+        assuming fit2 is the fit with more free parameters
+        if the fits are swapped the p-value will be negative"""
         if not np.all(self.x == fit2.x):
-            raise ValueError('Only two fits on the same data can be compared.')
+            raise ValueError("Only two fits on the same data can be compared.")
         if self.n_p == fit2.n_p:
-            raise ValueError('The two fits cannot have the same number of parameters.')
+            raise ValueError("The two fits cannot have the same number of parameters.")
         rss1 = self.get_cost_fun()(self.p)
         rss2 = fit2.get_cost_fun()(fit2.p)
         swapped = np.argmin((self.n_p, fit2.n_p))
@@ -162,11 +210,15 @@ class Fit(metaclass=ABCMeta):
         else:
             n = self.n_p if swapped else fit2.n_p
             dn = np.abs(self.n_p - fit2.n_p)
-            f_value = (np.abs(rss1 - rss2) / dn) / ((rss1 if swapped else rss2) / (self.n - n))
+            f_value = (np.abs(rss1 - rss2) / dn) / (
+                (rss1 if swapped else rss2) / (self.n - n)
+            )
             p_value = stats.f(dn, self.n - n).sf(f_value)
             return -p_value if swapped else p_value
 
-    def reset(self, log_scale: bool = None, fit_s: bool = True, p0: ArrayLike = None) -> Fit:
+    def reset(
+        self, log_scale: bool = None, fit_s: bool = True, p0: ArrayLike = None
+    ) -> Fit:
         new = copy(self)
         if log_scale is not None:
             if log_scale and not self.log_scale:
@@ -178,15 +230,29 @@ class Fit(metaclass=ABCMeta):
             new.fit_s = fit_s
         if p0 is not None:
             new.p0_manual = p0
-        if hasattr(new, 'r'):
-            delattr(new, 'r')
+        if hasattr(new, "r"):
+            delattr(new, "r")
         return new
 
     def get_best_p0(self, space: np.ndarray) -> Fit:
-        bounds = np.array([(-np.inf if i[0] is None else i[0], np.inf if i[1] is None else i[1])
-                           for i in self.bounds]).T
-        p0 = np.clip(np.stack(np.meshgrid(*self.n_p * (space,)), 0).reshape((self.n_p, -1)).T * self.p0, *bounds)
-        return self.reset(p0=p0[np.argmin(pmap(self.get_cost_fun(), p0, desc='finding best p0', leave=False))])
+        bounds = np.array(
+            [
+                (-np.inf if i[0] is None else i[0], np.inf if i[1] is None else i[1])
+                for i in self.bounds
+            ]
+        ).T
+        p0 = np.clip(
+            np.stack(np.meshgrid(*self.n_p * (space,)), 0).reshape((self.n_p, -1)).T
+            * self.p0,
+            *bounds,
+        )
+        return self.reset(
+            p0=p0[
+                np.argmin(
+                    pmap(self.get_cost_fun(), p0, desc="finding best p0", leave=False)
+                )
+            ]
+        )
 
 
 class Exponential1(Fit):
@@ -195,15 +261,18 @@ class Exponential1(Fit):
 
     @property
     def p0(self) -> ArrayLike:
-        """ y = a*exp(-t/tau)
-            return a, tau
+        """y = a*exp(-t/tau)
+        return a, tau
         """
-        x, y = finite(self.x.astype('complex'), np.log(self.y.astype('complex')))
+        x, y = finite(self.x.astype("complex"), np.log(self.y.astype("complex")))
         if len(x) < 2:
             return [1, 1]
         else:
             q = np.polyfit(x, y, 1)
-            return [np.clip(value.real, *bound) for value, bound in zip((np.exp(q[1]), -1 / q[0]), self.bounds)]
+            return [
+                np.clip(value.real, *bound)
+                for value, bound in zip((np.exp(q[1]), -1 / q[0]), self.bounds)
+            ]
 
     @staticmethod
     def fun(p: ArrayLike, x: Number | ArrayLike) -> ArrayLike:
@@ -220,8 +289,8 @@ class Exponential2(Fit):
 
     @property
     def p0(self) -> ArrayLike:
-        """ y = A(a*exp(-t/tau_0) + (1-a)*exp(-t/tau_1))
-            return A, a, tau_0, tau_1
+        """y = A(a*exp(-t/tau_0) + (1-a)*exp(-t/tau_1))
+        return A, a, tau_0, tau_1
         """
         n = len(self.x) // 2
         if n == 0:
@@ -229,8 +298,10 @@ class Exponential2(Fit):
         else:
             y0 = np.nanmax(self.y)
             q = Exponential1(self.x[n:], self.y[n:] / y0).p0
-            return [np.clip(value, *bound)
-                    for value, bound in zip((y0, 1 - q[0], q[1] / 3, q[1]), self.bounds)]
+            return [
+                np.clip(value, *bound)
+                for value, bound in zip((y0, 1 - q[0], q[1] / 3, q[1]), self.bounds)
+            ]
 
     @staticmethod
     def fun(p: ArrayLike, x: Number | ArrayLike) -> ArrayLike:
@@ -249,8 +320,8 @@ class Exponential3(Fit):
 
     @property
     def p0(self) -> ArrayLike:
-        """ y = A(a*exp(-t/tau_0) + b*exp(-t/tau_1) + (1-a-b)*exp(-t/tau-2))
-            return A, a, b, tau_0, tau_1, tau_2
+        """y = A(a*exp(-t/tau_0) + b*exp(-t/tau_1) + (1-a-b)*exp(-t/tau-2))
+        return A, a, b, tau_0, tau_1, tau_2
         """
         n = len(self.x) // 2
         if n == 0:
@@ -258,13 +329,20 @@ class Exponential3(Fit):
         else:
             y0 = np.nanmax(self.y)
             q = Exponential2(self.x[n:], self.y[n:] / y0).p0
-            return [np.clip(value, *bound)
-                    for value, bound in zip((y0, 0.3, 0.3, q[2] / 3, q[3] / 3, q[3]), self.bounds)]
+            return [
+                np.clip(value, *bound)
+                for value, bound in zip(
+                    (y0, 0.3, 0.3, q[2] / 3, q[3] / 3, q[3]), self.bounds
+                )
+            ]
 
     @staticmethod
     def fun(p: ArrayLike, x: Number | ArrayLike) -> ArrayLike:
-        return p[0] * (p[1] * np.exp(-x / p[3]) + p[2] * np.exp(-x / p[4]) +
-                       (1 - p[1] - p[2]) * np.exp(-x / p[5]))
+        return p[0] * (
+            p[1] * np.exp(-x / p[3])
+            + p[2] * np.exp(-x / p[4])
+            + (1 - p[1] - p[2]) * np.exp(-x / p[5])
+        )
 
 
 class Powerlaw(Fit):
@@ -272,15 +350,18 @@ class Powerlaw(Fit):
 
     @property
     def p0(self) -> ArrayLike:
-        """ y = (x/tau)^alpha
-            return alpha, tau
+        """y = (x/tau)^alpha
+        return alpha, tau
         """
-        q = np.polyfit(*finite(np.log(self.x.astype('complex')), np.log(self.y.astype('complex'))), 1)
+        q = np.polyfit(
+            *finite(np.log(self.x.astype("complex")), np.log(self.y.astype("complex"))),
+            1,
+        )
         return q[0].real, np.exp(-q[1] / q[0]).real
 
     @staticmethod
     def fun(p: ArrayLike, x: Number | ArrayLike) -> ArrayLike:
-        return ((np.asarray(x).astype('complex') / p[1]) ** p[0]).real
+        return ((np.asarray(x).astype("complex") / p[1]) ** p[0]).real
 
 
 class GammaCDF(Fit):
@@ -288,15 +369,14 @@ class GammaCDF(Fit):
 
     @property
     def p0(self) -> ArrayLike:
-        """ y = γ(k, x / θ) / Γ(k)
-        """
+        """y = γ(k, x / θ) / Γ(k)"""
         m = np.sum(-self.x[1:] * np.diff(self.y))
-        v = np.sum(-(self.x[1:] - m) ** 2 * np.diff(self.y))
-        return m ** 2 / v, v / m  # A, k, theta
+        v = np.sum(-((self.x[1:] - m) ** 2) * np.diff(self.y))
+        return m**2 / v, v / m  # A, k, theta
 
     @staticmethod
     def fun(p: ArrayLike, x: Number | ArrayLike) -> ArrayLike:
-        """ p: k, theta """
+        """p: k, theta"""
         return 1 - special.gammainc(p[0], x / p[1])
 
 
@@ -310,32 +390,38 @@ def nonnan(*args: ArrayLike) -> list[np.ndarray]:
     return [np.asarray(arg)[idx] for arg in args]
 
 
-def fminerr(fun: Callable[[ArrayLike, Any], float], a: ArrayLike, y: ArrayLike,
-            args: tuple[Any] = (), w: ArrayLike = None, s: ArrayLike = None,
-            diffstep: float = 1e-6) -> tuple[np.ndarray, float]:
-    """ Error estimation of a fit
+def fminerr(
+    fun: Callable[[ArrayLike, Any], float],
+    a: ArrayLike,
+    y: ArrayLike,
+    args: tuple[Any] = (),
+    w: ArrayLike = None,
+    s: ArrayLike = None,
+    diffstep: float = 1e-6,
+) -> tuple[np.ndarray, float]:
+    """Error estimation of a fit
 
-        Inputs:
-        fun:  function which was fitted to data
-        a:    function parameters
-        y:    ydata
-        args: extra arguments to fun
-        w:    weights
-        s:    error on y (std)
+    Inputs:
+    fun:  function which was fitted to data
+    a:    function parameters
+    y:    ydata
+    args: extra arguments to fun
+    w:    weights
+    s:    error on y (std)
 
-        Outputs:
-        da:    95% confidence interval
-        R2:    R^2
+    Outputs:
+    da:    95% confidence interval
+    R2:    R^2
 
-        Example:
-        x = np.array((-3,-1,2,4,5))
-        a = np.array((2,-3))
-        y = (15,0,5,30,50)
-        fun = lambda a: a[0]*x**2+a[1]
-        dp, R2 = fminerr(fun, p, y)
+    Example:
+    x = np.array((-3,-1,2,4,5))
+    a = np.array((2,-3))
+    y = (15,0,5,30,50)
+    fun = lambda a: a[0]*x**2+a[1]
+    dp, R2 = fminerr(fun, p, y)
 
-        adjusted from Matlab version by Thomas Schmidt, Leiden University
-        wp@tl2020
+    adjusted from Matlab version by Thomas Schmidt, Leiden University
+    wp@tl2020
     """
     eps = np.spacing(1)
     a = np.array(a).flatten()
@@ -348,15 +434,15 @@ def fminerr(fun: Callable[[ArrayLike, Any], float], a: ArrayLike, y: ArrayLike,
 
     if n_data > n_par:
         f0 = np.array(fun(a, *args)).flatten()
-        var_res = (np.sum(w * (f0 - y) ** 2) + np.sum(w * s ** 2)) / (np.sum(w) - n_par)
+        var_res = (np.sum(w * (f0 - y) ** 2) + np.sum(w * s**2)) / (np.sum(w) - n_par)  # type: ignore
 
         # calculate R^2
         ss_tot = np.sum(w * (y - np.nanmean(y)) ** 2)
         ss_res = np.sum(w * (y - f0) ** 2)
-        r_squared = 1 - ss_res / ss_tot
+        r_squared = 1 - ss_res / ss_tot  # type: ignore
 
         # calculate derivatives
-        jac = np.zeros((n_data, n_par), dtype='complex')
+        jac = np.zeros((n_data, n_par), dtype="complex")
         for i in range(n_par):
             ah = a.copy()
             ah[i] = np.clip(a[i] * (1 + diffstep), eps, None)
