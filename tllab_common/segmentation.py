@@ -23,7 +23,8 @@ with capture_stderr():
 
 import numpy as np
 import pandas
-from cellpose import models
+with redirect_stdout(StringIO()):
+    from cellpose import models
 from csbdeep.utils import normalize
 from ndbioimage import Imread
 from numpy.typing import ArrayLike, NDArray
@@ -449,7 +450,7 @@ def run_stardist(
 class CellPoseTiff(IJTiffParallel):
     def __init__(
         self,
-        model: models.Cellpose,
+        model: models.CellposeModel,
         cp_kwargs: dict[str, str] = None,
         *args: Any,
         **kwargs: Any,
@@ -458,7 +459,7 @@ class CellPoseTiff(IJTiffParallel):
         self.cp_kwargs = cp_kwargs or {}
         super().__init__(*args, **kwargs)
 
-    def parallel(self, frame: tuple[ArrayLike]) -> tuple[FrameInfo, ...]:
+    def parallel(self, frame: tuple[ArrayLike, ...]) -> tuple[FrameInfo, ...]:
         if len(frame) == 1:
             cells = self.model.eval(
                 np.stack(frame, 0),  # type: ignore
@@ -501,7 +502,7 @@ def run_cellpose_cpu(
     rn_kwargs = rn_kwargs or {}
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        model = models.Cellpose(gpu=False, model_type=model_type)
+        model = models.CellposeModel(gpu=False, model_type=model_type)
     cp_kwargs = filter_kwargs(model.eval, cp_kwargs)
 
     with tempfile.TemporaryDirectory() as tempdir:
@@ -545,7 +546,7 @@ def run_cellpose_gpu(
     rn_kwargs = rn_kwargs or {}
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        model = models.Cellpose(gpu=True, model_type=model_type)
+        model = models.CellposeModel(gpu=True, model_type=model_type)
     cp_kwargs = filter_kwargs(model.eval, cp_kwargs)
     with tempfile.TemporaryDirectory() as tempdir:
         tif_file = Path(tempdir) / "tm.tif"
@@ -709,42 +710,32 @@ def run_pre_track(
 def find_nucleoli(
     image: ArrayLike[Any], mask: ArrayLike[int], **kwargs
 ) -> NDArray[bool]:
-    def fill_mask(img: ArrayLike[Any], msk: ArrayLike[bool]) -> NDArray[Any]:
-        img = np.asarray(img).copy()
-        msk = np.asarray(msk).copy()
-        dist = img[msk].flatten()
-        if not len(dist):
-            return img
+    def fill_mask(img: ArrayLike[Any], msk: ArrayLike[bool]) -> tuple[tuple[int, int, int, int], NDArray[Any]]:
+        w = np.where(msk)
+        i0, j0 = np.min(w, 1)  # noqa
+        i1, j1 = np.max(w, 1)  # noqa
+        img = np.asarray(img[i0 : i1 + 1, j0 : j1 + 1]).copy()
+        msk = np.asarray(msk[i0 : i1 + 1, j0 : j1 + 1]).copy()
+        dist = img[msk]
         a, b = np.percentile(dist, (25, 90))
         dist = dist[(a <= dist) & (dist <= b)]
-        if not len(dist):
-            return img
         msk[img < a] = False
-        img[~msk] = np.random.choice(dist, np.sum(~msk))
-        return img
+        img[~msk] = np.random.choice(dist, (~msk).sum())
+        return (i0, j0, i1, j1), img
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        model = models.Cellpose(
-            gpu=len(tensorflow.config.list_physical_devices("GPU")) > 0,
-            model_type="cyto3",
-        )
+        model = models.CellposeModel(gpu=True)
     labels = [label for label in np.unique(mask) if label > 0]
     if labels:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            return (
-                np.max(
-                    model.eval(
-                        [
-                            fill_mask(image, mask == label)  # type: ignore
-                            for label in labels
-                        ],
-                        **filter_kwargs(model.eval, kwargs),
-                    )[0],
-                    0,
-                )
-                > 0
-            )
+        i, images = zip(
+            *[fill_mask(image, mask == label) for label in np.unique(mask) if label > 0]
+        )
+        kwargs['max_size_fraction'] = 1.0
+        masks = model.eval(list(images), **filter_kwargs(model.eval, kwargs))[0]
+        mask = np.zeros_like(mask, dtype=bool)
+        for (i0, j0, i1, j1), m in zip(i, masks):
+            mask[i0 : i1 + 1, j0 : j1 + 1] |= m > 0
+        return mask
     else:
-        return np.zeros(mask.shape, bool)
+        return np.zeros_like(mask, bool)

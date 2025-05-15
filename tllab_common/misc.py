@@ -54,6 +54,7 @@ __all__ = [
     "ipy_debug",
     "SliceKeepSize",
     "Struct",
+    "warn",
     "wraps_combine",
 ]
 

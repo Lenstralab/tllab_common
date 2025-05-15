@@ -235,7 +235,7 @@ def findcells(
     if imnuc is None:  # only one channel
         mask, la = make_mask(im, threshold, thres, smooth, minfeatsize, dilate)
         pk = skimage.feature.peak_local_max(
-            fill_nan(la), min_distance=ccdist, exclude_border=False
+            fill_nan(la), min_distance=ccdist // 2, exclude_border=False
         )
         pk = maskpk(pk, mask)
         pk = np.array(sorted([q.tolist() for q in pk])[::-1])
