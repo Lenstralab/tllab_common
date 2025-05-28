@@ -317,22 +317,33 @@ def trackmate(
             pat = re.compile(r"_ch1", re.IGNORECASE)
             xml_file = tif_file.with_suffix(".xml")
             trackmate_fiji(tif_file, xml_file, channel=1, **kwargs)
-            tracks = trackmate_peak_import(str(xml_file), get_tracks=True)
-            tracks.columns = [pat.sub("", column) for column in tracks.columns]
-            tracks = tracks[
-                ["t", "t_stamp", "x", "y", "label", "median_intensity", "area"]
-            ]
-            missing = interpolate_missing(tracks)
-            tracks = substitute_missing(tracks, missing)
-            tracks = sort_labels(tracks)
-            missing = interpolate_missing(tracks)
-            tracks = pandas.concat((tracks, missing), ignore_index=True)[
-                ["label", "median_intensity", "t"]
-            ]
+            try:
+                tracks = trackmate_peak_import(str(xml_file), get_tracks=True)
+                tracks.columns = [pat.sub("", column) for column in tracks.columns]
+                tracks = tracks[
+                    ["t", "t_stamp", "x", "y", "label", "median_intensity", "area"]
+                ]
+                missing = interpolate_missing(tracks)
+                tracks = substitute_missing(tracks, missing)
+                tracks = sort_labels(tracks)
+                missing = interpolate_missing(tracks)
+                tracks = pandas.concat((tracks, missing), ignore_index=True)[
+                    ["label", "median_intensity", "t"]
+                ]
+            except FileNotFoundError:
+                warnings.warn("trackmate encountered an error, segmentation will be saved, but not tracked!")
+                tracks = []
+                for t in range(mask.shape["t"]):
+                    cells = np.unique(mask[:, t])
+                    cells = cells[cells > 0]
+                    tracks.append(np.vstack((np.arange(1, len(cells) + 1), cells, t * np.ones(len(cells)))).T)
+                tracks = pandas.DataFrame(np.vstack(tracks), columns=["label", "median_intensity", "t"])
+                missing = None
         else:
             cells = np.unique(mask)
+            cells = cells[cells > 0]
             tracks = pandas.DataFrame(
-                np.vstack((np.arange(1, len(cells)), cells[cells > 0])).T,
+                np.vstack((np.arange(1, len(cells) + 1), cells)).T,
                 columns=["label", "median_intensity"],
             ).assign(t=0)
             missing = None
@@ -546,7 +557,7 @@ def run_cellpose_gpu(
     rn_kwargs = rn_kwargs or {}
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        model = models.CellposeModel(gpu=True, model_type=model_type)
+        model = models.CellposeModel(gpu=True, model_type=model_type or "cyto3")
     cp_kwargs = filter_kwargs(model.eval, cp_kwargs)
     with tempfile.TemporaryDirectory() as tempdir:
         tif_file = Path(tempdir) / "tm.tif"
