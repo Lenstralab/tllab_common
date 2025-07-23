@@ -82,9 +82,7 @@ def corrfft(im, jm):
     n_y = np.shape(im)[0]
     n_x = np.shape(im)[1]
 
-    cfunc = np.real(
-        np.fft.fftshift(np.fft.ifft2(np.fft.fft2(im) * np.conj(np.fft.fft2(jm))))
-    )
+    cfunc = np.real(np.fft.fftshift(np.fft.ifft2(np.fft.fft2(im) * np.conj(np.fft.fft2(jm)))))
     y, x = np.unravel_index(np.nanargmax(cfunc), cfunc.shape)
 
     d = [x - np.floor(n_x / 2), y - np.floor(n_y / 2)]
@@ -134,11 +132,7 @@ def fill_holes(im):
     im = im.copy()
     z = skimage.morphology.dilation(im) * (im == 0)
     holes_lbl = skimage.measure.label(im == 0)
-    lbl_edges = np.unique(
-        np.hstack(
-            (holes_lbl[:, 0], holes_lbl[:, -1], holes_lbl[0, :], holes_lbl[-1, :])
-        )
-    )
+    lbl_edges = np.unique(np.hstack((holes_lbl[:, 0], holes_lbl[:, -1], holes_lbl[0, :], holes_lbl[-1, :])))
     lbl_h = list(np.unique(holes_lbl))
     for i in lbl_h:
         if i == 0 or i in lbl_edges:
@@ -228,15 +222,11 @@ def findcells(
             cf = corrfft(imnuc.copy(), imnuc.copy())[1]
         r, cf = collectr(cf)
         ccdist = r[scipy.signal.find_peaks(-np.array(cf))[0][0]]
-        ccdist = np.round(np.clip(ccdist, 10, np.sqrt(np.prod(im.shape)) / 5)).astype(
-            "int"
-        )
+        ccdist = np.round(np.clip(ccdist, 10, np.sqrt(np.prod(im.shape)) / 5)).astype("int")
 
     if imnuc is None:  # only one channel
         mask, la = make_mask(im, threshold, thres, smooth, minfeatsize, dilate)
-        pk = skimage.feature.peak_local_max(
-            fill_nan(la), min_distance=ccdist // 2, exclude_border=False
-        )
+        pk = skimage.feature.peak_local_max(fill_nan(la), min_distance=ccdist // 2, exclude_border=False)
         pk = maskpk(pk, mask)
         pk = np.array(sorted([q.tolist() for q in pk])[::-1])
         markers = np.zeros(im.shape, int)
@@ -252,9 +242,7 @@ def findcells(
             lbl.remove(0)
         cells = fill_holes(cells)
         nuclei = np.zeros(im.shape)
-        for i in tqdm(
-            lbl, disable=len(lbl) < 25, leave=False
-        ):  # threshold each cell to find its nucleus
+        for i in tqdm(lbl, disable=len(lbl) < 25, leave=False):  # threshold each cell to find its nucleus
             cellmask = cells == i
             cm_la = cellmask * la
             cell = cm_la.flatten()
@@ -284,15 +272,11 @@ def findcells(
         mask, la = make_mask(im, threshold, thres, smooth, minfeatsize, dilate)
         cells = skimage.segmentation.watershed(-la, markers=nuclei, mask=mask)
         cells *= mask  # in Python2, watershed sometimes colors outside the mask
-        cells = np.dstack((cells, nuclei)).max(
-            2
-        )  # make sure each nucleus has a cell body
+        cells = np.dstack((cells, nuclei)).max(2)  # make sure each nucleus has a cell body
         cells = fill_holes(cells)
 
     if removeborders:
-        for lbl in np.unique(
-            np.hstack((cells[:, 0], cells[:, -1], cells[0, :], cells[-1, :]))
-        ):
+        for lbl in np.unique(np.hstack((cells[:, 0], cells[:, -1], cells[0, :], cells[-1, :]))):
             cells[cells == lbl] = 0
             nuclei[nuclei == lbl] = 0
     return cells, nuclei

@@ -71,9 +71,7 @@ def capture_stderr():
             capture.reset()
 
 
-def wraps_combine(
-    wrapper: Callable[[Any, ...], Any] | type, ignore: Sequence[str] = None
-) -> Callable[[Any, ...], R]:
+def wraps_combine(wrapper: Callable[[Any, ...], Any] | type, ignore: Sequence[str] = None) -> Callable[[Any, ...], R]:
     """decorator to combine arguments and doc strings of wrapped and wrapper functions,
     *args and/or **kwargs in wrapped will be replaced by the arguments from wrapper,
     duplicate arguments will be left in place in wrapped
@@ -108,12 +106,8 @@ def wraps_combine(
 
         try:
             try:
-                sig_wrapper = signature(
-                    wrapper.__init__ if isinstance(wrapper, type) else wrapper
-                )
-                sig_wrapped = signature(
-                    wrapped.__init__ if isinstance(wrapped, type) else wrapped
-                )
+                sig_wrapper = signature(wrapper.__init__ if isinstance(wrapper, type) else wrapper)
+                sig_wrapped = signature(wrapped.__init__ if isinstance(wrapped, type) else wrapped)
             except ValueError:
                 raise WrapsException
             z = [(p, p.name, p.kind) for p in sig_wrapped.parameters.values()]
@@ -121,43 +115,22 @@ def wraps_combine(
             z = [
                 (p, p.name, p.kind)
                 for p in sig_wrapper.parameters.values()
-                if (
-                    p.kind in (Parameter.VAR_POSITIONAL, Parameter.VAR_KEYWORD)
-                    or p.name not in n1
-                )
+                if (p.kind in (Parameter.VAR_POSITIONAL, Parameter.VAR_KEYWORD) or p.name not in n1)
                 and p.name not in ignore
             ]
             p0, n0, k0 = zip(*z) if len(z) else ((), (), ())
 
-            idx0a = (
-                k0.index(Parameter.VAR_POSITIONAL)
-                if Parameter.VAR_POSITIONAL in k0
-                else None
-            )
-            idx0k = (
-                k0.index(Parameter.VAR_KEYWORD) if Parameter.VAR_KEYWORD in k0 else None
-            )
-            idx1a = (
-                k1.index(Parameter.VAR_POSITIONAL)
-                if Parameter.VAR_POSITIONAL in k1
-                else None
-            )
-            idx1k = (
-                k1.index(Parameter.VAR_KEYWORD) if Parameter.VAR_KEYWORD in k1 else None
-            )
+            idx0a = k0.index(Parameter.VAR_POSITIONAL) if Parameter.VAR_POSITIONAL in k0 else None
+            idx0k = k0.index(Parameter.VAR_KEYWORD) if Parameter.VAR_KEYWORD in k0 else None
+            idx1a = k1.index(Parameter.VAR_POSITIONAL) if Parameter.VAR_POSITIONAL in k1 else None
+            idx1k = k1.index(Parameter.VAR_KEYWORD) if Parameter.VAR_KEYWORD in k1 else None
 
             if idx1a is not None:
                 if idx0a:
-                    new_parameters = [
-                        Parameter(p.name, p.kind, annotation=p.annotation)
-                        for p in p1[:idx1a]
-                    ]
+                    new_parameters = [Parameter(p.name, p.kind, annotation=p.annotation) for p in p1[:idx1a]]
                 else:
                     new_parameters = list(p1[:idx1a])
-                if (
-                    len(new_parameters) == 0
-                    or new_parameters[-1].default == Parameter.empty
-                ):
+                if len(new_parameters) == 0 or new_parameters[-1].default == Parameter.empty:
                     new_parameters.extend(p0[:idx0k])
                 else:
                     new_parameters.extend(
@@ -165,9 +138,7 @@ def wraps_combine(
                             Parameter(
                                 p.name,
                                 p.kind,
-                                default="empty"
-                                if p.default == Parameter.empty
-                                else p.default,
+                                default="empty" if p.default == Parameter.empty else p.default,
                                 annotation=p.annotation,
                             )
                             for p in p0[:idx0k]
@@ -178,18 +149,13 @@ def wraps_combine(
                 if idx0a is not None:
                     new_parameters = list(p1[:idx1k])
                 else:
-                    new_parameters = [
-                        Parameter(p.name, p.kind, annotation=p.annotation)
-                        for p in p1[:idx1k]
-                    ]
+                    new_parameters = [Parameter(p.name, p.kind, annotation=p.annotation) for p in p1[:idx1k]]
                 new_parameters.extend(
                     [
                         Parameter(
                             p.name,
                             Parameter.KEYWORD_ONLY,
-                            default="empty"
-                            if p.default == Parameter.empty
-                            else p.default,
+                            default="empty" if p.default == Parameter.empty else p.default,
                             annotation=p.annotation,
                         )
                         for p in p0[: (idx0k if idx0a is None else idx0a)]
@@ -200,9 +166,7 @@ def wraps_combine(
             if idx0k is not None:
                 new_parameters.append(p0[idx0k])
 
-            @makefun.wraps(
-                wrapped, new_sig=sig_wrapper.replace(parameters=new_parameters), doc=doc
-            )
+            @makefun.wraps(wrapped, new_sig=sig_wrapper.replace(parameters=new_parameters), doc=doc)
             def fun(*args: Any, **kwargs: Any) -> R:
                 return wrapped(*args, **kwargs)
 
@@ -213,9 +177,7 @@ def wraps_combine(
                 return wrapped(*args, **kwargs)
 
         except Exception:  # noqa
-            warnings.warn(
-                f"Exception annotating function {wrapped.__name__}:\n\n{format_exc()}"
-            )
+            warnings.warn(f"Exception annotating function {wrapped.__name__}:\n\n{format_exc()}")
 
             @makefun.wraps(wrapped, doc=doc)
             def fun(*args: Any, **kwargs: Any) -> R:
@@ -283,9 +245,7 @@ class Struct(dict):
             self[key] = value
 
 
-yaml.RoundTripRepresenter.add_representer(
-    Struct, yaml.RoundTripRepresenter.represent_dict
-)
+yaml.RoundTripRepresenter.add_representer(Struct, yaml.RoundTripRepresenter.represent_dict)
 
 
 @dataclass
@@ -331,9 +291,7 @@ class ErrorValue:
 
 def cfmt(string: str) -> str:
     """format a string for color printing, see cprint"""
-    pattern = regex.compile(
-        r"(?:^|[^\\])(?:\\\\)*(<)((?:(?:\\\\)*\\<|[^<])*?)(:)([^:]*?[^:\\](?:\\\\)*)(>)"
-    )
+    pattern = regex.compile(r"(?:^|[^\\])(?:\\\\)*(<)((?:(?:\\\\)*\\<|[^<])*?)(:)([^:]*?[^:\\](?:\\\\)*)(>)")
     fmt_split = regex.compile(r"(?:^|\W?)([a-zA-Z]|\d+)?")
     str_sub = regex.compile(r"(?:^|\\)((?:\\\\)*[<>])")
 
@@ -379,9 +337,7 @@ def cprint(*args, **kwargs):
 
 
 @wraps(warnings.warn)
-def warn(
-    message: str, category: type = None, stacklevel: int = 1, source: Any = None
-) -> None:
+def warn(message: str, category: type = None, stacklevel: int = 1, source: Any = None) -> None:
     warnings.warn(cfmt(f"<{message}:208>"), category, stacklevel + 1, source)
 
 
@@ -447,9 +403,7 @@ def get_slice(shape, n):
             stop = int(np.ceil(s if e.stop is None else e.stop))
             step = round(1 if e.step is None else e.step)
             if step != 1:
-                raise NotImplementedError(
-                    "step sizes other than 1 are not implemented!"
-                )
+                raise NotImplementedError("step sizes other than 1 are not implemented!")
             pad.append((max(0, -start) // step, max(0, stop - s) // step))
             if start < 0:
                 start = 0
@@ -548,25 +502,19 @@ class Data(metaclass=ABCMeta):
 
     def save(self, file: Path | str = None) -> None:
         if file is None and hasattr(self, "folder_out"):
-            file = (
-                self.folder_out
-                / f"{self.__class__.__name__.lower()}_{self.runtime}.pickle"
-            )
+            file = self.folder_out / f"{self.__class__.__name__.lower()}_{self.runtime}.pickle"
         if file is not None:
             pickle_dump(self, file)  # type: ignore
 
     @classmethod
     def load_from_parameter_file(cls, parameter_file: Path | str) -> Self:
         parameter_file = Path(parameter_file)
-        params = getParams(
-            parameter_file.with_suffix(".yml"), required=({"paths": ("folder_out",)},)
-        )
+        params = getParams(parameter_file.with_suffix(".yml"), required=({"paths": ("folder_out",)},))
         if Path(params["paths"]["folder_out"]).exists():
             pickles = [
                 file
                 for file in Path(params["paths"]["folder_out"]).iterdir()
-                if file.name.startswith(f"{cls.__name__.lower()}_")
-                and file.suffix == ".pickle"
+                if file.name.startswith(f"{cls.__name__.lower()}_") and file.suffix == ".pickle"
             ]
         else:
             pickles = None
@@ -584,8 +532,7 @@ class Data(metaclass=ABCMeta):
             pickles = [
                 file
                 for file in Path(self.params["paths"]["folder_out"]).iterdir()
-                if file.name.startswith(f"{self.__class__.__name__.lower()}_")
-                and file.suffix == ".pickle"
+                if file.name.startswith(f"{self.__class__.__name__.lower()}_") and file.suffix == ".pickle"
             ]
             if pickles:
                 pickles.remove(max(pickles))
@@ -593,18 +540,10 @@ class Data(metaclass=ABCMeta):
                     pkl.unlink()
 
     def color(self, color_or_channel: int | str) -> str:
-        return (
-            color_or_channel
-            if isinstance(color_or_channel, str)
-            else self.channels[color_or_channel]
-        )
+        return color_or_channel if isinstance(color_or_channel, str) else self.channels[color_or_channel]
 
     def channel(self, color_or_channel: int | str) -> int:
-        return (
-            self.colors[color_or_channel]
-            if isinstance(color_or_channel, str)
-            else color_or_channel
-        )
+        return self.colors[color_or_channel] if isinstance(color_or_channel, str) else color_or_channel
 
     @classmethod
     def get_template_file(cls) -> Path:
@@ -628,9 +567,7 @@ class Data(metaclass=ABCMeta):
     @classmethod
     def update_parameter_file(cls, parameter_file: str | Path) -> None:
         parameter_file = Path(parameter_file)
-        new_parameter_file = (
-            parameter_file.parent / f"{parameter_file.stem}_updated.yml"
-        )
+        new_parameter_file = parameter_file.parent / f"{parameter_file.stem}_updated.yml"
         if new_parameter_file.exists():
             raise FileExistsError(f"File {new_parameter_file} already exists.")
         else:
@@ -665,9 +602,7 @@ def df_join(h: pandas.DataFrame) -> pandas.DataFrame:
     return df
 
 
-def add_extra_parameters(
-    parameters: dict[Hashable, Any], extra_parameters: dict[Hashable, Any]
-) -> None:
+def add_extra_parameters(parameters: dict[Hashable, Any], extra_parameters: dict[Hashable, Any]) -> None:
     for key, value in extra_parameters.items():
         if isinstance(value, dict):
             add_extra_parameters(parameters[key], value)

@@ -85,9 +85,7 @@ class Fit(metaclass=ABCMeta):
             x = np.asarray(x)
         return x.real, self.fun(self.p, x)
 
-    def evaluate_ci(
-        self, x: Number | ArrayLike = None
-    ) -> tuple[ArrayLike, ArrayLike, ArrayLike]:
+    def evaluate_ci(self, x: Number | ArrayLike = None) -> tuple[ArrayLike, ArrayLike, ArrayLike]:
         if x is None:
             x = np.linspace(np.nanmin(self.x), np.nanmax(self.x))
         else:
@@ -104,23 +102,13 @@ class Fit(metaclass=ABCMeta):
             def cost(p: ArrayLike) -> float:
                 with np.errstate(divide="ignore"):
                     return np.nansum(
-                        np.abs(
-                            self.w
-                            / s
-                            * (
-                                np.log(self.y)
-                                - np.log(np.clip(self.fun(p, self.x), eps, None))
-                            )
-                            ** 2
-                        )
+                        np.abs(self.w / s * (np.log(self.y) - np.log(np.clip(self.fun(p, self.x), eps, None))) ** 2)
                     )
         else:
 
             def cost(p: ArrayLike) -> float:
                 with np.errstate(divide="ignore"):
-                    return np.nansum(
-                        np.abs(self.w / s * (self.y - self.fun(p, self.x)) ** 2)
-                    )
+                    return np.nansum(np.abs(self.w / s * (self.y - self.fun(p, self.x)) ** 2))
 
         return cost
 
@@ -161,13 +149,9 @@ class Fit(metaclass=ABCMeta):
                     self.s,
                 )
             else:
-                self.p_ci95, self.r_squared = fminerr(
-                    self.fun, self.sort(r.x), self.y, (self.x,), self.w, self.s
-                )
+                self.p_ci95, self.r_squared = fminerr(self.fun, self.sort(r.x), self.y, (self.x,), self.w, self.s)
             if self.n - self.n_p - 1 > 0:
-                self.r_squared_adjusted = 1 - (1 - self.r_squared) * (self.n - 1) / (
-                    self.n - self.n_p - 1
-                )
+                self.r_squared_adjusted = 1 - (1 - self.r_squared) * (self.n - 1) / (self.n - self.n_p - 1)
             else:
                 self.r_squared_adjusted = np.nan
             return r
@@ -182,10 +166,7 @@ class Fit(metaclass=ABCMeta):
 
     @property
     def log_likelihood(self) -> float:
-        return (
-            -self.n * np.log(2 * np.pi * self.r.fun / (self.n - 1)) / 2
-            - (self.n - 1) / 2
-        )
+        return -self.n * np.log(2 * np.pi * self.r.fun / (self.n - 1)) / 2 - (self.n - 1) / 2
 
     @property
     def bic(self) -> float:
@@ -210,15 +191,11 @@ class Fit(metaclass=ABCMeta):
         else:
             n = self.n_p if swapped else fit2.n_p
             dn = np.abs(self.n_p - fit2.n_p)
-            f_value = (np.abs(rss1 - rss2) / dn) / (
-                (rss1 if swapped else rss2) / (self.n - n)
-            )
+            f_value = (np.abs(rss1 - rss2) / dn) / ((rss1 if swapped else rss2) / (self.n - n))
             p_value = stats.f(dn, self.n - n).sf(f_value)
             return -p_value if swapped else p_value
 
-    def reset(
-        self, log_scale: bool = None, fit_s: bool = True, p0: ArrayLike = None
-    ) -> Fit:
+    def reset(self, log_scale: bool = None, fit_s: bool = True, p0: ArrayLike = None) -> Fit:
         new = copy(self)
         if log_scale is not None:
             if log_scale and not self.log_scale:
@@ -236,23 +213,13 @@ class Fit(metaclass=ABCMeta):
 
     def get_best_p0(self, space: np.ndarray) -> Fit:
         bounds = np.array(
-            [
-                (-np.inf if i[0] is None else i[0], np.inf if i[1] is None else i[1])
-                for i in self.bounds
-            ]
+            [(-np.inf if i[0] is None else i[0], np.inf if i[1] is None else i[1]) for i in self.bounds]
         ).T
         p0 = np.clip(
-            np.stack(np.meshgrid(*self.n_p * (space,)), 0).reshape((self.n_p, -1)).T
-            * self.p0,
+            np.stack(np.meshgrid(*self.n_p * (space,)), 0).reshape((self.n_p, -1)).T * self.p0,
             *bounds,
         )
-        return self.reset(
-            p0=p0[
-                np.argmin(
-                    pmap(self.get_cost_fun(), p0, desc="finding best p0", leave=False)
-                )
-            ]
-        )
+        return self.reset(p0=p0[np.argmin(pmap(self.get_cost_fun(), p0, desc="finding best p0", leave=False))])
 
 
 class Exponential1(Fit):
@@ -269,10 +236,7 @@ class Exponential1(Fit):
             return [1, 1]
         else:
             q = np.polyfit(x, y, 1)
-            return [
-                np.clip(value.real, *bound)
-                for value, bound in zip((np.exp(q[1]), -1 / q[0]), self.bounds)
-            ]
+            return [np.clip(value.real, *bound) for value, bound in zip((np.exp(q[1]), -1 / q[0]), self.bounds)]
 
     @staticmethod
     def fun(p: ArrayLike, x: Number | ArrayLike) -> ArrayLike:
@@ -298,10 +262,7 @@ class Exponential2(Fit):
         else:
             y0 = np.nanmax(self.y)
             q = Exponential1(self.x[n:], self.y[n:] / y0).p0
-            return [
-                np.clip(value, *bound)
-                for value, bound in zip((y0, 1 - q[0], q[1] / 3, q[1]), self.bounds)
-            ]
+            return [np.clip(value, *bound) for value, bound in zip((y0, 1 - q[0], q[1] / 3, q[1]), self.bounds)]
 
     @staticmethod
     def fun(p: ArrayLike, x: Number | ArrayLike) -> ArrayLike:
@@ -325,24 +286,17 @@ class Exponential3(Fit):
         """
         n = len(self.x) // 2
         if n == 0:
-            return [np.nan, np.nan, np.nan, np.nan, np.nan]
+            return [np.nan, np.nan, np.nan, np.nan, np.nan, np.nan]
         else:
             y0 = np.nanmax(self.y)
             q = Exponential2(self.x[n:], self.y[n:] / y0).p0
             return [
-                np.clip(value, *bound)
-                for value, bound in zip(
-                    (y0, 0.3, 0.3, q[2] / 3, q[3] / 3, q[3]), self.bounds
-                )
+                np.clip(value, *bound) for value, bound in zip((y0, 0.3, 0.3, q[2] / 3, q[3] / 3, q[3]), self.bounds)
             ]
 
     @staticmethod
     def fun(p: ArrayLike, x: Number | ArrayLike) -> ArrayLike:
-        return p[0] * (
-            p[1] * np.exp(-x / p[3])
-            + p[2] * np.exp(-x / p[4])
-            + (1 - p[1] - p[2]) * np.exp(-x / p[5])
-        )
+        return p[0] * (p[1] * np.exp(-x / p[3]) + p[2] * np.exp(-x / p[4]) + (1 - p[1] - p[2]) * np.exp(-x / p[5]))
 
 
 class Powerlaw(Fit):

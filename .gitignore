@@ -9,3 +9,4 @@
 # to big for git:
 /test_files/wimread
 /dist/
+/uv.lock

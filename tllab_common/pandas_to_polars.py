@@ -101,10 +101,7 @@ List = (
 )
 List.set_parse_action(parse_list)
 Col = pp.Group(
-    pp.Word(pp.alphanums + "_")
-    ^ pp.Literal("`")
-    + pp.Word(pp.printables + " ", exclude_chars="`")
-    + pp.Literal("`")
+    pp.Word(pp.alphanums + "_") ^ pp.Literal("`") + pp.Word(pp.printables + " ", exclude_chars="`") + pp.Literal("`")
 ) + pp.ZeroOrMore(
     pp.Group(
         pp.Char(".")
@@ -118,17 +115,7 @@ Id1 = Not + Id
 Id1.set_parse_action(parse_not)
 CompOp = pp.Combine(pp.Char("<>") + pp.Opt("=")) ^ "==" ^ "!="
 CompOp.set_parse_action(parse_op)
-CalcOp = (
-    pp.Char("+-/*%@&|^~")
-    ^ "//"
-    ^ "**"
-    ^ "<<"
-    ^ ">>"
-    ^ "in"
-    ^ "not in"
-    ^ "is"
-    ^ "is not"
-)
+CalcOp = pp.Char("+-/*%@&|^~") ^ "//" ^ "**" ^ "<<" ^ ">>" ^ "in" ^ "not in" ^ "is" ^ "is not"
 CalcOp.set_parse_action(parse_op)
 Op = CompOp ^ CalcOp
 Expr = pp.Forward()

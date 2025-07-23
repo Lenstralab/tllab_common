@@ -119,9 +119,7 @@ class RoundTripRepresenter(yaml.RoundTripRepresenter):
     pass
 
 
-RoundTripRepresenter.add_representer(
-    CommentedDefaultMap, RoundTripRepresenter.represent_dict
-)
+RoundTripRepresenter.add_representer(CommentedDefaultMap, RoundTripRepresenter.represent_dict)
 
 
 @wraps(yaml.load)
@@ -137,9 +135,7 @@ def yaml_load(stream: str | bytes | Path | IO) -> Any:
         return y.load(stream)
 
 
-def yaml_dump(
-    data: Any, stream: str | bytes | Path | IO = None, unformat: bool = False
-) -> Optional[str]:
+def yaml_dump(data: Any, stream: str | bytes | Path | IO = None, unformat: bool = False) -> Optional[str]:
     y = yaml.YAML()
     y.Representer = RoundTripRepresenter
     with StringIO() as str_io:
@@ -195,17 +191,11 @@ def get_params(
 
     def more_params(parameters: dict) -> None:
         """recursively load more parameters from another file"""
-        more_parameters_file = (
-            parameters["more_parameters"]
-            or parameters["more_params"]
-            or parameters["moreParams"]
-        )
+        more_parameters_file = parameters["more_parameters"] or parameters["more_params"] or parameters["moreParams"]
         if more_parameters_file is not None:
             more_parameters_file = Path(more_parameters_file)
             if not more_parameters_file.is_absolute():
-                more_parameters_file = (
-                    Path(parent_file).absolute().parent / more_parameters_file
-                )
+                more_parameters_file = Path(parent_file).absolute().parent / more_parameters_file
             cprint(f"<Loading more parameters from <{more_parameters_file}:.b>:g>")
             more_parameters = yaml_load_and_format(more_parameters_file)
             more_params(more_parameters)
@@ -219,14 +209,18 @@ def get_params(
 
             add_items(parameters, more_parameters)
 
-    def check_params(parameters: dict, template: dict, path: str = "") -> None:  # noqa
+    def check_params(
+        parameters: dict,
+        template: dict,  # noqa
+        replace_values: bool = True,  # noqa
+        replace_comments: bool = True,  # noqa
+        path: str = "",
+    ) -> None:
         """recursively check parameters and add defaults"""
         for key, value in template.items():
             if key not in parameters and (value is not None or not ignore_empty):
                 if warn:
-                    cprint(
-                        f"<Parameter <{path}{key}:.b> missing, adding with value: {value}.:208>"
-                    )
+                    cprint(f"<Parameter <{path}{key}:.b> missing, adding with value: {value}.:208>")
                 parameters[key] = value
                 if (
                     isinstance(template, yaml.CommentedMap)
@@ -234,31 +228,21 @@ def get_params(
                     and key in template.ca.items
                     and isinstance(template.ca.items[key][2], yaml.CommentToken)
                 ):
-                    parameters.yaml_add_eol_comment(
-                        template.ca.items[key][2].value, key
-                    )
+                    parameters.yaml_add_eol_comment(template.ca.items[key][2].value, key)
             elif isinstance(value, dict):
                 if isinstance(parameters[key], dict):
-                    check_params(parameters[key], value, f"{path}{key}.")
+                    check_params(parameters[key], value, replace_values, replace_comments, f"{path}{key}.")
                 else:
                     if warn:
                         if parameters[key] is None:
-                            cprint(
-                                f"<Parameter <{path}{key}:.b> empty, adding values: {template[key]}.:208>"
-                            )
+                            cprint(f"<Parameter <{path}{key}:.b> empty, adding values: {template[key]}.:208>")
                         else:
-                            cprint(
-                                f"<Overwriting <{path}{key}: {parameters[key]}:.b>.:r>"
-                            )
+                            cprint(f"<Overwriting <{path}{key}: {parameters[key]}:.b>.:r>")
                     parameters[key] = template[key]
             elif replace_values:
                 parameters[key] = value
 
-        if (
-            replace_comments
-            and isinstance(template, yaml.CommentedMap)
-            and isinstance(parameters, yaml.CommentedMap)
-        ):
+        if replace_comments and isinstance(template, yaml.CommentedMap) and isinstance(parameters, yaml.CommentedMap):
             # don't know how to add comments before items
             for key, value in template.ca.items.items():
                 if isinstance(value[2], yaml.CommentToken):
@@ -271,11 +255,7 @@ def get_params(
         path: str = "",  # noqa
     ) -> None:
         for key, value in parameters.items():
-            if (
-                isinstance(value, dict)
-                and isinstance(template, dict)
-                and key in template
-            ):
+            if isinstance(value, dict) and isinstance(template, dict) and key in template:
                 compare_params(value, template[key], reverse, f"{path}{key}.")
             elif (
                 not (value is None or isinstance(value, dict))
@@ -283,13 +263,9 @@ def get_params(
                 and isinstance(template.get(key), dict)
             ):
                 if reverse:
-                    cprint(
-                        f"<New parameter: <{path}{key}:.b>: {value} is not a dictionary anymore.:r>"
-                    )
+                    cprint(f"<New parameter: <{path}{key}:.b>: {value} is not a dictionary anymore.:r>")
                 else:
-                    cprint(
-                        f"<Old parameter: <{path}{key}:.b>: {value} is now a dictionary.:r>"
-                    )
+                    cprint(f"<Old parameter: <{path}{key}:.b>: {value} is now a dictionary.:r>")
             elif template is None or isinstance(template, dict) and key not in template:
                 if reverse:
                     cprint(f"<New parameter: <{path}{key}:.b>: {value}.:g>")
@@ -310,10 +286,7 @@ def get_params(
         n = len(parameters) - 1
         for i, (key, value) in enumerate(parameters.items()):  # noqa
             if isinstance(parameters, yaml.CommentedMap):
-                if (
-                    key in parameters.ca.items
-                    and parameters.ca.items[key][2] is not None
-                ):
+                if key in parameters.ca.items and parameters.ca.items[key][2] is not None:
                     comment = parameters.ca.items[key][2].value.rstrip("\n") + "\n"
                     if (gap == 2 or (i == n and gap)) and not isinstance(value, dict):
                         comment += "\n"
@@ -334,7 +307,9 @@ def get_params(
         if compare:
             compare_params(template, params)
             compare_params(params, template, reverse=True)
-        check_params(params, template)
+        if template_file_is_parent:
+            check_params(template, params, False, True)
+        check_params(params, template, replace_values, replace_comments)
 
     check_new_lines(params)
     return params
@@ -359,9 +334,7 @@ def save_roi(
             f" -0.5<={columns[3]}<={shape[3] - 0.5}"
         )
     if not coordinates.empty:
-        roi = roifile.ImagejRoi.frompoints(
-            coordinates[list(columns[:2])].to_numpy().astype(float)
-        )
+        roi = roifile.ImagejRoi.frompoints(coordinates[list(columns[:2])].to_numpy().astype(float))
         roi.roitype = roifile.ROI_TYPE.POINT
         roi.options = roifile.ROI_OPTIONS.SUB_PIXEL_RESOLUTION
         roi.counters = len(coordinates) * [0]

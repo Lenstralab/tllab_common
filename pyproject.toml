@@ -1,6 +1,6 @@
 [project]
 name = "tllab_common"
-version = "2025.5.2"
+version = "2025.7.0"
 description = "Common code for the Lenstra lab."
 authors = [
     { name = "Lenstra lab NKI", email = "t.lenstra@nki.nl" }
@@ -42,6 +42,10 @@ repository = "https://github.com/Lenstralab/tllab_common"
 
 [tool.isort]
 line_length = 119
+
+[tool.ruff]
+line-length = 119
+indent-width = 4
 
 [build-system]
 requires = ["poetry-core"]

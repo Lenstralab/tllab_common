@@ -109,8 +109,7 @@ def trackmate_peak_import(trackmate_xml_path, get_tracks=False):
     # Get tracks
     if get_tracks:
         filtered_track_ids = [
-            int(track.get("TRACK_ID"))
-            for track in root.find("Model").find("FilteredTracks").findall("TrackID")
+            int(track.get("TRACK_ID")) for track in root.find("Model").find("FilteredTracks").findall("TrackID")
         ]
 
         label_id = 0
@@ -136,9 +135,7 @@ def trackmate_peak_import(trackmate_xml_path, get_tracks=False):
 
         # Label remaining columns
         single_track = trajs.loc[trajs["label"].isnull()]
-        trajs.loc[trajs["label"].isnull(), "label"] = label_id + np.arange(
-            0, len(single_track)
-        )
+        trajs.loc[trajs["label"].isnull(), "label"] = label_id + np.arange(0, len(single_track))
 
     return trajs
 
