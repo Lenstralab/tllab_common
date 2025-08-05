@@ -288,6 +288,38 @@ class ErrorValue:
     def __str__(self) -> str:
         return f"{self}"
 
+    def __mul__(self, other: ErrorValue | Number) -> ErrorValue:
+        if isinstance(other, ErrorValue):
+            return ErrorValue(
+                self.value * other.value,
+                np.sqrt(abs(self.value) ** 2 * other.error**2 + abs(other.value) ** 2 * self.error**2),
+            )
+        else:
+            return ErrorValue(self.value * other, self.error * other)
+
+    def __truediv__(self, other) -> ErrorValue:
+        if isinstance(other, ErrorValue):
+            return ErrorValue(
+                self.value / other.value,
+                np.sqrt(
+                    abs(1 / other.value) ** 2 * self.error**2 + abs(self.value / other.value**2) ** 2 * self.error**2
+                ),
+            )
+        else:
+            return ErrorValue(self.value / other, self.error / other)
+
+    def __add__(self, other: ErrorValue | Number) -> ErrorValue:
+        if isinstance(other, ErrorValue):
+            return ErrorValue(self.value + other.value, np.sqrt(self.error**2 + other.error**2))
+        else:
+            return ErrorValue(self.value + other, self.error)
+
+    def __sub__(self, other: ErrorValue | Number) -> ErrorValue:
+        if isinstance(other, ErrorValue):
+            return ErrorValue(self.value - other.value, np.sqrt(self.error**2 + other.error**2))
+        else:
+            return ErrorValue(self.value - other, self.error)
+
 
 def cfmt(string: str) -> str:
     """format a string for color printing, see cprint"""
