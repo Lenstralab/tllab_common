@@ -33,12 +33,16 @@ from scipy.interpolate import interp1d
 from scipy.ndimage import distance_transform_edt
 from scipy.spatial.distance import cdist
 from skimage.segmentation import watershed
-from stardist.models import StarDist2D  # noqa
 from tiffwrite import FrameInfo, IJTiffFile, IJTiffParallel
 from tqdm.auto import tqdm, trange
 
 from .findcells import findcells
 from .pytrackmate import trackmate_peak_import
+
+try:
+    from stardist.models import StarDist2D  # noqa
+except ImportError:
+    StarDist2D = None
 
 try:
     import imagej
@@ -396,6 +400,9 @@ def run_stardist(
 ) -> None:
     if model_type is None:
         model_type = "2D_versatile_fluo"
+    if StarDist2D is None:
+        raise ImportError("stardist is not installed, install stardist and numpy >= 1.20, < 2 using pip")
+
     with redirect_stdout(StringIO()):
         model = StarDist2D.from_pretrained(model_type)
     tm_kwargs = tm_kwargs or {}
