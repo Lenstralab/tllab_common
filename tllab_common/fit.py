@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 from abc import ABCMeta, abstractmethod
+from collections import namedtuple
 from copy import copy
 from functools import cached_property
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Optional, Sequence
 
 import numpy as np
+import scipy
 from numpy.typing import ArrayLike
 from parfor import pmap
 from scipy import special, stats
 from scipy.optimize import OptimizeResult, minimize
+from .misc import ErrorValue
 
 Number = int | float | complex
 
@@ -21,8 +24,8 @@ class Fit(metaclass=ABCMeta):
         self,
         x: ArrayLike,
         y: ArrayLike,
-        w: [ArrayLike, None] = None,
-        s: [ArrayLike, None] = None,
+        w: Optional[ArrayLike] = None,
+        s: Optional[ArrayLike] = None,
         fit_window: Sequence[float] = None,
         log_scale: bool = False,
         fit_s: bool = True,
@@ -221,6 +224,24 @@ class Fit(metaclass=ABCMeta):
         )
         return self.reset(p0=p0[np.argmin(pmap(self.get_cost_fun(), p0, desc="finding best p0", leave=False))])
 
+    def compare(self, other, print_result=True) -> np.ndarray:
+        """Compare a fit with another fit of the same type on other data to find if their parameters belong to the same
+        distribution. Parameters are assumed to be normally distributed around p with a standard deviation of
+        p_ci_95 / 1.96. P-values are calculated using a Mann-Whitney U test. Remember to use the Bonferonni method,
+        to correct your signicance level to deal with false positives."""
+        if not self.__class__.__name__ == other.__class__.__name__:
+            raise ValueError(f"Cannot compare {self.__class__.__name__} to {other.__class__.__name__}")
+        m = [
+            mannwhitneyu(self.n, p1, dp1 * np.sqrt(self.n) / 1.96, other.n, p2, dp2 * np.sqrt(other.n) / 1.96).pvalue
+            for p1, dp1, p2, dp2 in zip(self.p, self.p_ci95, other.p, other.p_ci95)
+        ]
+        if print_result:
+            for i, (n, p1, dp1, p2, dp2) in enumerate(zip(m, self.p, self.p_ci95, other.p, other.p_ci95), 1):
+                e1 = ErrorValue(p1, dp1)
+                e2 = ErrorValue(p2, dp2)
+                print(f"parameter {i}: {e1:.2g} <--> {e2:.2g}: {n}")
+        return np.array(m)
+
 
 class Exponential1(Fit):
     n_p = 2
@@ -415,3 +436,46 @@ def fminerr(
         return 1.96 * da.real, r_squared.real
     else:
         return np.full_like(a, np.nan), np.nan
+
+
+MannwhitneyuResult = namedtuple("MannwhitneyuResult", ("statistic", "pvalue"))
+
+
+def get_mwu_z(u: float, n1: int, n2: int, continuity: bool = True) -> float:
+    """Standardized MWU statistic, copied from scipy"""
+    # Follows mannwhitneyu [2]
+    mu = n1 * n2 / 2
+    n = n1 + n2
+
+    s = np.sqrt(n1 * n2 / 12 * (n + 1))
+
+    numerator = u - mu
+
+    # Continuity correction.
+    # Because SF is always used to calculate the p-value, we can always
+    # _subtract_ 0.5 for the continuity correction. This always increases the
+    # p-value to account for the rest of the probability mass _at_ q = U.
+    if continuity:
+        numerator -= 0.5
+
+    # no problem evaluating the norm SF at an infinity
+    with np.errstate(divide="ignore", invalid="ignore"):
+        z = numerator / s
+    return z
+
+
+def mannwhitneyu(n1: int, mu1: float, sigma1: float, n2: int, mu2: float, sigma2: float) -> MannwhitneyuResult:
+    """Perform the Mann-Whitney U rank test on two independent samples,
+    with only knowledge of the shape of the distributions (normal distribution)
+    and the number of samples.
+
+    Parameters
+    ----------
+    n1, n2 : number of samples in distribution 1 and 2
+    mu1, mu2 : means
+    sigma1, sigma2 : standard deviations
+    """
+    u = n1 * n2 * (scipy.special.erf((mu1 - mu2) / np.sqrt(2 * (sigma1**2 + sigma2**2))) + 1) / 2
+    z = get_mwu_z(u, n1, n2)
+    p = scipy.stats.norm.sf(np.abs(z)) * 2
+    return MannwhitneyuResult(u, p)
