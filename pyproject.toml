@@ -1,6 +1,6 @@
 [project]
 name = "tllab_common"
-version = "2025.10.0"
+version = "2025.10.1"
 description = "Common code for the Lenstra lab."
 authors = [
     { name = "Lenstra lab NKI", email = "t.lenstra@nki.nl" }
@@ -27,6 +27,7 @@ dependencies = [
     "py",
     "pyimagej",
     "pyparsing",
+    "ray",
     "regex",
     "roifile",
     "ruamel.yaml",
