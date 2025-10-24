@@ -1,6 +1,6 @@
 [project]
 name = "tllab_common"
-version = "2025.9.1"
+version = "2025.10.0"
 description = "Common code for the Lenstra lab."
 authors = [
     { name = "Lenstra lab NKI", email = "t.lenstra@nki.nl" }
@@ -16,6 +16,7 @@ dependencies = [
     "csbdeep",
     "dill",
     "ipython",
+    "laptrack == 0.17.0",
     "makefun",
     "ndbioimage >= 2024.10.0",
     "numpy >= 1.20, < 2 ; extra == 'stardist'",

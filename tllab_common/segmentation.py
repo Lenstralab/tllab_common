@@ -18,15 +18,21 @@ with capture_stderr():
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
     import tensorflow
 
-    logger = tensorflow.get_logger()
-    logger.setLevel(logging.ERROR)
+    tensorflow.get_logger().setLevel(logging.ERROR)
 
 import numpy as np
 import pandas
+import polars as pl
+
+os.environ["RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO"] = "0"
+import ray  # noqa
+
+logging.getLogger("ray").setLevel(logging.ERROR)
 
 with redirect_stdout(StringIO()):
     from cellpose import models
 from csbdeep.utils import normalize
+from laptrack import LapTrack, ParallelBackend
 from ndbioimage import Imread
 from numpy.typing import ArrayLike, NDArray
 from scipy.interpolate import interp1d
@@ -80,56 +86,89 @@ def interp_label(
     mask: np.ndarray = None,
 ) -> np.ndarray:
     """return a label field with lbl at time q interpolated from labels at times ts"""
-    return lbl * (
-        interp1d(
-            ts,
-            np.dstack([label_dist(label, lbl, mask) for label in labels]),
-            fill_value=np.zeros_like(labels[0]),
-            bounds_error=False,
-        )(t)
-        > 0
-    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        return lbl * (
+            interp1d(
+                ts,
+                np.dstack([label_dist(label, lbl, mask) for label in labels]),
+                fill_value=np.zeros_like(labels[0]),
+                bounds_error=False,
+            )(t)
+            > 0
+        )
 
 
 class SwapLabels:
-    def __init__(self, tracks: pandas.DataFrame, min_frames: int = None) -> None:
-        if min_frames:
-            tracks = (
-                tracks.groupby("label")
-                .apply(lambda df: df.assign(n_frames=len(df)))
-                .query("n_frames > @min_frames", local_dict=dict(min_frames=min_frames))
-                .reset_index(drop=True)
-            )
-        # ensure that labels are consecutive
-        if not tracks.empty:
-            d = {u: i for i, u in enumerate(tracks["label"].unique(), 1)}
-            tracks["label"] = tracks.apply(lambda s: d[s["label"]], 1)
-        self.tracks = tracks
+    def __init__(self, tracks: pandas.DataFrame | pl.DataFrame, min_frames: int = None) -> None:  # noqa
+        if isinstance(tracks, pl.DataFrame):
+            if min_frames:
+                tracks = tracks.filter(pl.len().over("track_id") > min_frames)
+            if not tracks.is_empty():
+                d = {
+                    u: i for i, u in enumerate(tracks.select(pl.col("track_id").unique()).sort("track_id").to_series())
+                }
+                tracks = tracks.with_columns(track_id=pl.col("track_id").replace_strict(d))
+            self.tracks = tracks
+        else:
+            if min_frames:
+                tracks = (
+                    tracks.groupby("label")
+                    .apply(lambda df: df.assign(n_frames=len(df)))
+                    .query("n_frames > @min_frames", local_dict=dict(min_frames=min_frames))
+                    .reset_index(drop=True)
+                )
+            # ensure that labels are consecutive
+            if not tracks.empty:
+                d = {u: i for i, u in enumerate(tracks["label"].unique(), 1)}
+                tracks["label"] = tracks.apply(lambda s: d[s["label"]], 1)  # type: ignore
+            self.tracks = tracks
 
-    def __call__(self, im: Imread, frame_in: np.ndarray, c: int, z: int, t: int) -> np.ndarray:
+    def __call__(self, frame_in: np.ndarray, t: int) -> np.ndarray:
         frame_out = np.zeros_like(frame_in)
         for i, j in self.get_mapping(t).items():
             frame_out[frame_in == i] = j
         return frame_out
 
     def get_mapping(self, t: int) -> dict[int, int]:
-        return {
-            int(i): int(j)
-            for i, j in self.tracks.query("t == @t", local_dict=dict(t=t))[["median_intensity", "label"]].to_numpy()
-            if np.isfinite(i)
-        }
+        if isinstance(self.tracks, pl.DataFrame):
+            return {
+                int(i): int(j)
+                for i, j in self.tracks.filter(pl.col("t") == t).select("cell", "track_id").to_numpy()
+                if np.isfinite(i)
+            }
+        else:
+            return {
+                int(i): int(j)
+                for i, j in self.tracks.query("t == @t", local_dict=dict(t=t))[
+                    ["median_intensity", "label"]
+                ].to_numpy()
+                if np.isfinite(i)
+            }
 
     def get_labels(self) -> np.ndarray:
-        return self.tracks["label"].unique()
+        if isinstance(self.tracks, pl.DataFrame):
+            return self.tracks.select(pl.col("track_id").unique()).to_series().to_numpy()
+        else:
+            return self.tracks["label"].unique()
 
 
-def sort_labels(tracks: pandas.DataFrame) -> pandas.DataFrame:
-    """make labels consistent across different runs"""
-    relabel_dict = {
-        int(key): value
-        for value, key in enumerate(tracks.groupby("label").aggregate("mean").sort_values("area").index, 1)
-    }
-    return tracks.groupby("label").apply(lambda x: x.assign(label=relabel_dict[x["label"].mean()]))
+def sort_labels(tracks: pl.DataFrame | pandas.DataFrame) -> pl.DataFrame | pandas.DataFrame:
+    """make labels consistent across different runs by sorting them according to mean cell area"""
+    if isinstance(tracks, pl.DataFrame):
+        relabel_dict = {
+            int(key): int(value)
+            for value, (key,) in enumerate(
+                tracks.group_by("track_id").agg(pl.mean("area")).sort("area").select("track_id").iter_rows()
+            )
+        }
+        return tracks.with_columns(track_id=pl.col("track_id").replace_strict(relabel_dict))
+    else:
+        relabel_dict = {
+            int(key): value  # type: ignore
+            for value, key in enumerate(tracks.groupby("label").aggregate("mean").sort_values("area").index, 1)
+        }
+        return tracks.groupby("label").apply(lambda x: x.assign(label=relabel_dict[x["label"].mean()]))  # type: ignore
 
 
 def get_time_points(t: int, missing: Sequence[int]) -> tuple[int, int]:
@@ -142,39 +181,88 @@ def get_time_points(t: int, missing: Sequence[int]) -> tuple[int, int]:
     return t_a, t_b
 
 
-def interpolate_missing(tracks: pandas.DataFrame, t_len: int = None) -> pandas.DataFrame:
+def interpolate_missing(tracks: pl.DataFrame | pandas.DataFrame, t_len: int = None) -> pl.DataFrame | pandas.DataFrame:
     """interpolate the position of the cell in missing frames"""
     missing = []
-    for cell in tracks["label"].unique():
-        h = tracks.query("label==@cell", local_dict=dict(cell=cell))
-        if t_len is None:
-            t_missing = list(set(range(int(h["t"].min()), int(h["t"].max()))) - set(h["t"]))
+    if isinstance(tracks, pl.DataFrame):
+        for (track_id,), group in tracks.group_by("track_id"):
+            if t_len is None:
+                t_missing = list(
+                    set(
+                        range(int(group.select(pl.col("t").min()).item()), int(group.select(pl.col("t").max()).item()))
+                    )
+                    - set(group.select("t").to_series())
+                )
+            else:
+                t_missing = list(set(range(t_len)) - set(group.select("t").to_series()))
+            if len(t_missing):
+                missing.append(
+                    pl.DataFrame(
+                        {
+                            "t": t_missing,
+                            "cell": track_id,
+                            "x": np.interp(t_missing, *group.select("t", "x").to_numpy().T),
+                            "y": np.interp(t_missing, *group.select("t", "y").to_numpy().T),
+                            "area": 0,
+                            "track_id": track_id,
+                        },
+                        schema=tracks.schema,
+                    )
+                )
+        if len(missing):
+            return pl.concat(missing)
         else:
-            t_missing = list(set(range(t_len)) - set(h["t"]))
-        g = pandas.DataFrame(np.full((len(t_missing), tracks.shape[1]), np.nan), columns=tracks.columns)
-        g["t"] = t_missing
-        g["t_stamp"] = t_missing
-        g["x"] = np.interp(t_missing, h["t"], h["x"])
-        g["y"] = np.interp(t_missing, h["t"], h["y"])
-        g["label"] = cell
-        missing.append(g)
-    return pandas.concat(missing, ignore_index=True)
+            return pl.DataFrame(schema=tracks.schema)
+    else:
+        for cell in tracks["label"].unique():
+            h = tracks.query("label==@cell", local_dict=dict(cell=cell))
+            if t_len is None:
+                t_missing = list(set(range(int(h["t"].min()), int(h["t"].max()))) - set(h["t"]))
+            else:
+                t_missing = list(set(range(t_len)) - set(h["t"]))
+            g = pandas.DataFrame(np.full((len(t_missing), tracks.shape[1]), np.nan), columns=tracks.columns)
+            g["t"] = t_missing
+            g["t_stamp"] = t_missing
+            g["x"] = np.interp(t_missing, h["t"], h["x"])
+            g["y"] = np.interp(t_missing, h["t"], h["y"])
+            g["label"] = cell
+            missing.append(g)
+        return pandas.concat(missing, ignore_index=True)
 
 
-def substitute_missing(tracks: pandas.DataFrame, missing: pandas.DataFrame, distance: int = 1) -> pandas.DataFrame:
+def substitute_missing(
+    tracks: pl.DataFrame | pandas.DataFrame, missing: pl.DataFrame | pandas.DataFrame, distance: int = 1
+) -> pl.DataFrame | pandas.DataFrame:
     """relabel rows in tracks if they overlap with a row in missing"""
-    for _, row in missing.iterrows():
-        a = tracks.query(
-            "t==@t & (x-@x)**2 + (y-@y)**2 < @distance",
-            local_dict=dict(t=row["t"], x=row["x"], y=row["y"], distance=distance),
-        ).copy()
-        a["label"] = row["label"]
-        if len(a) == 1:
-            tracks.loc[a.index[0], "label"] = row["label"]
-        elif len(a) > 1:
-            idx = ((a[["x", "y"]] - row[["x", "y"]].tolist()) ** 2).sum(1).idxmin()
-            tracks.loc[idx, "label"] = row["label"]
-    return tracks
+    if isinstance(tracks, pl.DataFrame):
+        missing = (
+            tracks.join_where(
+                missing,
+                (pl.col("t") == pl.col("t_r"))
+                & ((pl.col("x") - pl.col("x_r")) ** 2 + (pl.col("y") - pl.col("y_r")) ** 2 < distance**2),
+                suffix="_r",
+            )
+            .select(
+                pl.all()
+                .bottom_k_by((pl.col("x") - pl.col("x_r")) ** 2 + (pl.col("y") - pl.col("y_r")) ** 2, 1)
+                .over("t", "cell", mapping_strategy="explode")
+            )
+            .select("t", "cell", "x", "y", "area", track_id="track_id_r")
+        )
+        return pl.concat((tracks.join(missing, ("t", "cell"), "anti"), missing)).sort("t", "cell")
+    else:
+        for _, row in missing.iterrows():
+            a = tracks.query(
+                "t==@t & (x-@x)**2 + (y-@y)**2 < @d",
+                local_dict=dict(t=row["t"], x=row["x"], y=row["y"], d=distance**2),
+            ).copy()
+            a["label"] = row["label"]
+            if len(a) == 1:
+                tracks.loc[a.index[0], "label"] = row["label"]
+            elif len(a) > 1:
+                idx = ((a[["x", "y"]] - row[["x", "y"]].tolist()) ** 2).sum(1).idxmin()
+                tracks.loc[idx, "label"] = row["label"]
+        return tracks
 
 
 def filter_kwargs(function: Callable, kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -185,8 +273,8 @@ def filter_kwargs(function: Callable, kwargs: dict[str, Any]) -> dict[str, Any]:
 def get_xy(im: ArrayLike) -> tuple[float, float]:
     im = np.asarray(im)
     x, y = np.meshgrid(np.arange(im.shape[1]), np.arange(im.shape[0]))
-    s = np.sum(im)
-    return np.sum(im * y) / s, np.sum(im * x) / s
+    s = np.nansum(im)
+    return np.nansum(im * y) / s, np.nansum(im * x) / s  # type: ignore
 
 
 def connect_nuclei_with_cells(nuclei: ArrayLike, cells: ArrayLike) -> np.ndarray:
@@ -281,6 +369,147 @@ def trackmate_fiji(
     ij.dispose()
 
 
+def lap_track(
+    max_file: Path | str,
+    tif_file: Path | str,
+    tiff_out: Path | str,
+    table_out: Path | str = None,
+    min_frames: int = None,
+    remove_borders: bool = False,
+    nucleoli_kwargs: dict[str, Any] = None,
+    min_area: int = None,
+    **kwargs: dict[str, str],
+) -> None:
+    """use laptrack to make sure cells have the same label in all frames, relabel even if there's just one frame,
+    to make sure that cell numbers are consecutive
+    also remove cells/nuclei touching the border of the image if needed (only if not a time-lapse)
+    """
+    with ExitStack() as stack:  # noqa
+        mask = stack.enter_context(Imread(tif_file, axes="ctyx"))  # noqa
+        y, x = np.meshgrid(np.arange(mask.shape["y"]), np.arange(mask.shape["x"]), indexing="ij")
+        cells = []
+        for t in trange(mask.shape["t"], desc="generating cell mask properties", leave=False):
+            cells_in_mask = np.unique(mask[-1, t])  # type: ignore
+            cells_in_mask = cells_in_mask[np.isfinite(cells_in_mask) & (cells_in_mask > 0)]
+            xc = []
+            yc = []
+            area = []
+            c = []
+            for cell in cells_in_mask:
+                mask_t = mask[-1, t] == cell  # type: ignore
+                sum_mask = np.sum(mask_t)
+                if min_area is None or sum_mask >= min_area:
+                    xc.append(np.sum(mask_t * x) / sum_mask)  # type: ignore
+                    yc.append(np.sum(mask_t * y) / sum_mask)  # type: ignore
+                    area.append(sum_mask)
+                    c.append(cell)
+
+            cells.append(
+                pl.DataFrame(
+                    {"t": t, "cell": c, "x": xc, "y": yc, "area": area},
+                    schema={"t": pl.UInt32, "cell": pl.UInt32, "x": pl.Float64, "y": pl.Float64, "area": pl.UInt64},
+                )
+            )
+        cells = pl.concat(cells)
+
+        if mask.shape["t"] > 1:
+
+            def metric(a, b):
+                ta, na, xa, ya = int(a[0]), int(a[1]), float(a[2]), float(a[3])
+                tb, nb, xb, yb = int(b[0]), int(b[1]), float(b[2]), float(b[3])
+                dt = np.abs(ta - tb)
+                cell_a = mask[-1, ta] == na  # type: ignore
+                cell_b = mask[-1, tb] == nb  # type: ignore
+                return (1 - np.sum(cell_a & cell_b) / np.sum(cell_a | cell_b)) * np.sqrt(  # type: ignore
+                    dt * ((xa - xb) ** 2 + (ya - yb) ** 2)
+                )
+
+            lt_kwargs = filter_kwargs(LapTrack, {key.lower(): value for key, value in kwargs.items()}) | {
+                "metric": metric,
+                "gap_closing_metric": metric,
+                "splitting_metric": metric,
+                "merging_metric": metric,
+                "parallel_backend": ParallelBackend.ray,
+            }
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=RuntimeWarning)
+                warnings.simplefilter("ignore", category=FutureWarning)
+                lt = LapTrack(**lt_kwargs)
+            track_df, _split_df, _merge_df = lt.predict_dataframe(
+                cells.to_pandas(), coordinate_cols=["t", "cell", "x", "y"], frame_col="t", only_coordinate_cols=False
+            )
+            tracks = pl.from_pandas(track_df.reset_index(drop=True), schema_overrides=cells.schema).select(
+                cells.columns, track_id=pl.col("track_id") + 1
+            )
+            missing = interpolate_missing(tracks)
+            tracks = substitute_missing(tracks, missing)
+            tracks = sort_labels(tracks)
+            missing = interpolate_missing(tracks)
+            tracks = pl.concat((tracks, missing)).select("t", "cell", "track_id")
+        else:
+            tracks = cells.select("t", "cell", track_id=pl.col("cell") - 1)
+            missing = None
+
+        if table_out:
+            tracks.write_csv(table_out, separator="\t")
+
+        if nucleoli_kwargs.get("remove") is True:  # noqa
+            im = stack.enter_context(Imread(max_file, axes="ctyx"))[nucleoli_kwargs["channel"]]  # noqa
+        else:
+            im = None
+
+        # relabel the labels according to the tracks and also add missing labels by interpolation
+        swapper = SwapLabels(tracks, min_frames)
+        dtype = "uint8" if swapper.tracks.select(pl.col("track_id").max()).item() <= 255 else "uint16"
+        tif = stack.enter_context(IJTiffFile(tiff_out, pxsize=mask.pxsize_um, colormap="glasbey", dtype=dtype))
+        for t in trange(mask.shape["t"], desc="reordering cells", leave=False):
+            frame = swapper(np.asarray(mask[:, t]), t)  # type: ignore
+            if im is not None:
+                nucleoli = find_nucleoli(
+                    im[t],
+                    frame[-1],
+                    **nucleoli_kwargs,
+                )
+                frame[0, nucleoli] = 0
+            for c in range(frame.shape[0]):
+                if missing is not None:
+                    missing_t = missing.filter(pl.col("t") == t)
+                    for cell in missing_t.select(pl.col("track_id").unique()).to_series().to_list():
+                        time_points = get_time_points(
+                            t,
+                            missing.filter(pl.col("track_id") == cell).select("t").to_series().to_list(),
+                        )
+                        add_cell = interp_label(
+                            t,
+                            time_points,
+                            [swapper(mask[c, i], i) for i in time_points],  # type: ignore
+                            int(cell),
+                            frame[c] > 0,
+                        )
+                        frame[c] += add_cell.astype(frame.dtype)
+            if remove_borders and mask.shape["t"] == 1:
+                for lbl in np.unique(
+                    np.hstack(
+                        (
+                            frame[:, :, 0],
+                            frame[:, :, -1],
+                            frame[:, 0, :],
+                            frame[:, -1, :],
+                        )
+                    )
+                ):
+                    frame[frame == lbl] = 0
+                lbls = np.unique(frame)
+                lbls = lbls[lbls > 0]
+                frame_orig = frame.copy()
+                for i, j in enumerate(lbls):
+                    frame[frame_orig == j] = i
+
+            for c in range(frame.shape[0]):
+                # TODO: transforms
+                tif.save(frame[c], c, 0, t)
+
+
 def trackmate(
     max_file: Path | str,
     tif_file: Path | str,
@@ -295,9 +524,10 @@ def trackmate(
     to make sure that cell numbers are consecutive
     also remove cells/nuclei touching the border of the image if needed (only if not a time-lapse)
     """
+    warnings.warn("trackmate will be removed in the future, use lap_track instead", DeprecationWarning, stacklevel=2)
 
-    with ExitStack() as stack:
-        mask = stack.enter_context(Imread(tif_file, axes="ctyx", dtype=int))
+    with ExitStack() as stack:  # noqa
+        mask = stack.enter_context(Imread(tif_file, axes="ctyx", dtype=int))  # noqa
         if mask.shape["t"] > 1:
             pat = re.compile(r"_ch1", re.IGNORECASE)
             xml_file = tif_file.with_suffix(".xml")
@@ -315,7 +545,7 @@ def trackmate(
                 warnings.warn("trackmate encountered an error, segmentation will be saved, but not tracked!")
                 tracks = []
                 for t in range(mask.shape["t"]):
-                    cells = np.unique(mask[:, t])
+                    cells = np.unique(mask[:, t])  # type: ignore
                     cells = cells[cells > 0]
                     tracks.append(np.vstack((np.arange(1, len(cells) + 1), cells, t * np.ones(len(cells)))).T)
                 tracks = pandas.DataFrame(np.vstack(tracks), columns=["label", "median_intensity", "t"])
@@ -331,17 +561,17 @@ def trackmate(
         if table_out:
             tracks.to_csv(table_out, sep="\t", index=False)
 
-        if nucleoli_kwargs.get("remove") is True:
-            im = stack.enter_context(Imread(max_file, axes="ctyx"))[nucleoli_kwargs["channel"]]
+        if nucleoli_kwargs.get("remove") is True:  # noqa
+            im = stack.enter_context(Imread(max_file, axes="ctyx"))[nucleoli_kwargs["channel"]]  # noqa
         else:
             im = None
 
         # relabel the labels according to the tracks and also add missing labels by interpolation
-        mask.frame_decorator = SwapLabels(tracks, min_frames)
-        dtype = "uint8" if mask.frame_decorator.tracks["label"].max() <= 255 else "uint16"
+        swapper = SwapLabels(tracks, min_frames)
+        dtype = "uint8" if swapper.tracks["label"].max() <= 255 else "uint16"
         tif = stack.enter_context(IJTiffFile(tiff_out, pxsize=mask.pxsize_um, colormap="glasbey", dtype=dtype))
         for t in trange(mask.shape["t"], desc="reordering cells with trackmate", leave=False):
-            frame = np.asarray(mask[:, t])
+            frame = swapper(np.asarray(mask[:, t]), t)  # type: ignore
             if im is not None:
                 nucleoli = find_nucleoli(
                     im[t],
@@ -360,11 +590,11 @@ def trackmate(
                         a = interp_label(
                             t,
                             time_points,
-                            [mask[c, i] for i in time_points],  # type: ignore
+                            [swapper(mask[c, i], i) for i in time_points],  # type: ignore
                             int(cell),
                             frame[c] > 0,
                         )
-                        frame[c] += a
+                        frame[c] += a.astype(frame.dtype)
             if remove_borders and mask.shape["t"] == 1:
                 for lbl in np.unique(
                     np.hstack(
@@ -397,21 +627,28 @@ def run_stardist(
     table_out: Path | str = None,
     tm_kwargs: dict[str, str] = None,
     rn_kwargs: dict[str, str | float] = None,
+    cell_tracker: str = "laptrack",
 ) -> None:
+    warnings.warn(
+        "stardist seems currently unmaintained and therefore will be removed in the future, use cellpose instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
     if model_type is None:
         model_type = "2D_versatile_fluo"
     if StarDist2D is None:
         raise ImportError("stardist is not installed, install stardist and numpy >= 1.20, < 2 using pip")
 
     with redirect_stdout(StringIO()):
-        model = StarDist2D.from_pretrained(model_type)
+        model = StarDist2D.from_pretrained(model_type)  # noqa
     tm_kwargs = tm_kwargs or {}
     rn_kwargs = rn_kwargs or {}
 
     with tempfile.TemporaryDirectory() as tempdir:
         tif_file = Path(tempdir) / "tm.tif"
 
-        with Imread(image, axes="ctyx") as im:
+        with Imread(image, axes="ctyx") as im:  # noqa
             with IJTiffFile(tif_file, pxsize=im.pxsize_um) as tif:
                 for t in tqdm(
                     range(im.shape["t"]),
@@ -427,7 +664,10 @@ def run_stardist(
                     )
 
         rn_kwargs["channel"] = channel_cell
-        trackmate(image, tif_file, tiff_out, table_out, nucleoli_kwargs=rn_kwargs, **tm_kwargs)
+    if cell_tracker == "trackmate":
+        trackmate(image, tif_file, tiff_out, table_out, nucleoli_kwargs=rn_kwargs, **tm_kwargs)  # noqa
+    else:
+        lap_track(image, tif_file, tiff_out, table_out, nucleoli_kwargs=rn_kwargs, **tm_kwargs)
 
 
 class CellPoseTiff(IJTiffParallel):
@@ -479,6 +719,7 @@ def run_cellpose_cpu(
     cp_kwargs: dict[str, str] = None,
     tm_kwargs: dict[str, str] = None,
     rn_kwargs: dict[str, str | float] = None,
+    cell_tracker: str = "laptrack",
 ) -> None:
     cp_kwargs = cp_kwargs or {}
     tm_kwargs = tm_kwargs or {}
@@ -490,22 +731,25 @@ def run_cellpose_cpu(
 
     with tempfile.TemporaryDirectory() as tempdir:
         tif_file = Path(tempdir) / "tm.tif"
-        with Imread(image, axes="ctyx") as im:
+        with Imread(image, axes="ctyx") as im:  # noqa
             with CellPoseTiff(model, cp_kwargs, tif_file, pxsize=im.pxsize_um) as tif:
                 for t in tqdm(
                     range(im.shape["t"]),
                     total=im.shape["t"],
-                    desc="running cellpose",
+                    desc="running cellpose on the CPU",
                     disable=im.shape["t"] < 10,
                 ):
                     tif.save(  # type: ignore
-                        (im[channel_cell, t],) if channel_nuc is None else (im[channel_cell, t], im[channel_nuc, t]),
+                        (im[channel_cell, t],) if channel_nuc is None else (im[channel_cell, t], im[channel_nuc, t]),  # type: ignore
                         0,
                         0,
                         t,
                     )
         rn_kwargs["channel"] = channel_cell if channel_nuc is None else channel_nuc
-        trackmate(image, tif_file, tiff_out, table_out, nucleoli_kwargs=rn_kwargs, **tm_kwargs)
+        if cell_tracker == "trackmate":
+            trackmate(image, tif_file, tiff_out, table_out, nucleoli_kwargs=rn_kwargs, **tm_kwargs)  # noqa
+        else:
+            lap_track(image, tif_file, tiff_out, table_out, nucleoli_kwargs=rn_kwargs, **tm_kwargs)
 
 
 def run_cellpose_gpu(
@@ -519,6 +763,7 @@ def run_cellpose_gpu(
     cp_kwargs: dict[str, str] = None,
     tm_kwargs: dict[str, str] = None,
     rn_kwargs: dict[str, str | float] = None,
+    cell_tracker: str = "laptrack",
 ) -> None:
     cp_kwargs = cp_kwargs or {}
     tm_kwargs = tm_kwargs or {}
@@ -529,12 +774,12 @@ def run_cellpose_gpu(
     cp_kwargs = filter_kwargs(model.eval, cp_kwargs)
     with tempfile.TemporaryDirectory() as tempdir:
         tif_file = Path(tempdir) / "tm.tif"
-        with Imread(image, axes="ctyx") as im:
+        with Imread(image, axes="ctyx") as im:  # noqa
             with IJTiffFile(tif_file, pxsize=im.pxsize_um) as tif:
                 for t in tqdm(
                     range(im.shape["t"]),
                     total=im.shape["t"],
-                    desc="running cellpose",
+                    desc="running cellpose on a GPU",
                     disable=im.shape["t"] < 10,
                 ):
                     if channel_nuc is None:
@@ -564,7 +809,10 @@ def run_cellpose_gpu(
                         tif.save(cells, 0, 0, t)
                         tif.save(nuclei, 1, 0, t)
         rn_kwargs["channel"] = channel_cell if channel_nuc is None else channel_nuc
-        trackmate(image, tif_file, tiff_out, table_out, nucleoli_kwargs=rn_kwargs, **tm_kwargs)
+        if cell_tracker == "trackmate":
+            trackmate(image, tif_file, tiff_out, table_out, nucleoli_kwargs=rn_kwargs, **tm_kwargs)  # noqa
+        else:
+            lap_track(image, tif_file, tiff_out, table_out, nucleoli_kwargs=rn_kwargs, **tm_kwargs)
 
 
 @wraps(run_cellpose_cpu)
@@ -595,6 +843,7 @@ def run_findcells(
     fc_kwargs: dict[str, str] = None,
     tm_kwargs: dict[str, str] = None,
     rn_kwargs: dict[str, str | float] = None,
+    cell_tracker: str = "laptrack",
 ) -> None:
     fc_kwargs = fc_kwargs or {}
     tm_kwargs = tm_kwargs or {}
@@ -604,7 +853,7 @@ def run_findcells(
     with tempfile.TemporaryDirectory() as tempdir:
         tif_file = Path(tempdir) / "tm.tif"
 
-        with Imread(image, axes="ctyx") as im:
+        with Imread(image, axes="ctyx") as im:  # noqa
             with FindCellsTiff(fc_kwargs, tif_file, pxsize=im.pxsize_um) as tif:
                 for t in tqdm(
                     range(im.shape["t"]),
@@ -614,14 +863,17 @@ def run_findcells(
                 ):
                     assert channel_cell is not None, "channel_cell cannot be None"
                     tif.save(  # type: ignore
-                        (im[channel_cell, t],) if channel_nuc is None else (im[channel_cell, t], im[channel_nuc, t]),
+                        (im[channel_cell, t],) if channel_nuc is None else (im[channel_cell, t], im[channel_nuc, t]),  # type: ignore
                         0,
                         0,
                         t,
                     )
 
         rn_kwargs["channel"] = channel_cell if channel_nuc is None else channel_nuc
-        trackmate(image, tif_file, tiff_out, table_out, nucleoli_kwargs=rn_kwargs, **tm_kwargs)
+        if cell_tracker == "trackmate":
+            trackmate(image, tif_file, tiff_out, table_out, nucleoli_kwargs=rn_kwargs, **tm_kwargs)  # noqa
+        else:
+            lap_track(image, tif_file, tiff_out, table_out, nucleoli_kwargs=rn_kwargs, **tm_kwargs)
 
 
 class PreTrackTiff(IJTiffParallel):
@@ -643,9 +895,14 @@ class PreTrackTiff(IJTiffParallel):
         return ((frame, 0, 0, 0),)
 
 
-def run_pre_track(image: Path | str, tiff_out: Path | str, pre_track: pandas.DataFrame, radius: float) -> None:
-    dtype = "uint8" if pre_track["cell"].max() < 255 else "uint16"
-    with Imread(image) as im:
+def run_pre_track(
+    image: Path | str, tiff_out: Path | str, pre_track: pl.DataFrame | pandas.DataFrame, radius: float
+) -> None:
+    if isinstance(pre_track, pandas.DataFrame):
+        pre_track = pl.from_pandas(pre_track)
+
+    dtype = "uint8" if pre_track.select(pl.col("cell").max()).item() < 255 else "uint16"
+    with Imread(image) as im:  # noqa
         with PreTrackTiff(
             im.shape["yx"],  # type: ignore
             radius,
@@ -661,20 +918,20 @@ def run_pre_track(image: Path | str, tiff_out: Path | str, pre_track: pandas.Dat
                 disable=im.shape["t"] < 10,
             ):
                 tif.save(  # type: ignore
-                    (pre_track.query("T == @t", local_dict=dict(t=t))[["cell", "y", "x"]].to_numpy(),),
+                    (pre_track.filter(pl.col("T") == t).select("cell", "y", "x").to_numpy(),),
                     0,
                     0,
                     t,
                 )
 
 
-def find_nucleoli(image: ArrayLike[Any], mask: ArrayLike[int], **kwargs) -> NDArray[bool]:
-    def fill_mask(img: ArrayLike[Any], msk: ArrayLike[bool]) -> tuple[tuple[int, int, int, int], NDArray[Any]]:
+def find_nucleoli(image: ArrayLike[Any], mask: ArrayLike[int], **kwargs) -> NDArray[bool]:  # type: ignore
+    def fill_mask(img: ArrayLike[Any], msk: ArrayLike[bool]) -> tuple[tuple[int, int, int, int], NDArray[Any]]:  # type: ignore
         w = np.where(msk)
         i0, j0 = np.min(w, 1)  # noqa
         i1, j1 = np.max(w, 1)  # noqa
-        img = np.asarray(img[i0 : i1 + 1, j0 : j1 + 1]).copy()
-        msk = np.asarray(msk[i0 : i1 + 1, j0 : j1 + 1]).copy()
+        img = np.asarray(img[i0 : i1 + 1, j0 : j1 + 1]).copy()  # type: ignore
+        msk = np.asarray(msk[i0 : i1 + 1, j0 : j1 + 1]).copy()  # type: ignore
         dist = img[msk]
         a, b = np.percentile(dist, (25, 90))
         dist = dist[(a <= dist) & (dist <= b)]

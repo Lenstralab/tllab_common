@@ -479,3 +479,32 @@ def mannwhitneyu(n1: int, mu1: float, sigma1: float, n2: int, mu2: float, sigma2
     z = get_mwu_z(u, n1, n2)
     p = scipy.stats.norm.sf(np.abs(z)) * 2
     return MannwhitneyuResult(u, p)
+
+
+def mannwhitneyu_exp(
+    n1: int, a1: Sequence[float], tau1: Sequence[float], n2: int, a2: Sequence[float], tau2: Sequence[float]
+) -> MannwhitneyuResult:
+    """Perform the Mann-Whitney U rank test on two independent samples,
+    with only knowledge of the shape of the distributions (sum of exponential distributions)
+    and the number of samples.
+
+    Parameters
+    ----------
+    n1, n2 : number of samples in distribution 1 and 2
+    a1, a2 : fractions of each component
+    tau1, tau2 : scales of each component
+    """
+
+    if len(a1) != len(tau1):
+        raise ValueError("len(a1) and len(tau1) must match")
+    if len(a2) != len(tau2):
+        raise ValueError("len(a2) and len(tau2) must match")
+
+    u = 0
+    for i, t in zip(a1, tau1):
+        for j, s in zip(a2, tau2):
+            u += i * j * s / (s + t)
+    u *= n1 * n2 / (sum(a1) * sum(a2))
+    z = get_mwu_z(u, n1, n2)
+    p = scipy.stats.norm.sf(np.abs(z)) * 2
+    return MannwhitneyuResult(u, p)
