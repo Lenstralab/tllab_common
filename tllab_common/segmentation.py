@@ -627,7 +627,7 @@ def run_stardist(
     table_out: Path | str = None,
     tm_kwargs: dict[str, str] = None,
     rn_kwargs: dict[str, str | float] = None,
-    cell_tracker: str = "laptrack",
+    cell_tracker: str = "trackmate",
 ) -> None:
     warnings.warn(
         "stardist seems currently unmaintained and therefore will be removed in the future, use cellpose instead",
@@ -719,7 +719,7 @@ def run_cellpose_cpu(
     cp_kwargs: dict[str, str] = None,
     tm_kwargs: dict[str, str] = None,
     rn_kwargs: dict[str, str | float] = None,
-    cell_tracker: str = "laptrack",
+    cell_tracker: str = "trackmate",
 ) -> None:
     cp_kwargs = cp_kwargs or {}
     tm_kwargs = tm_kwargs or {}
@@ -763,7 +763,7 @@ def run_cellpose_gpu(
     cp_kwargs: dict[str, str] = None,
     tm_kwargs: dict[str, str] = None,
     rn_kwargs: dict[str, str | float] = None,
-    cell_tracker: str = "laptrack",
+    cell_tracker: str = "trackmate",
 ) -> None:
     cp_kwargs = cp_kwargs or {}
     tm_kwargs = tm_kwargs or {}
@@ -843,7 +843,7 @@ def run_findcells(
     fc_kwargs: dict[str, str] = None,
     tm_kwargs: dict[str, str] = None,
     rn_kwargs: dict[str, str | float] = None,
-    cell_tracker: str = "laptrack",
+    cell_tracker: str = "trackmate",
 ) -> None:
     fc_kwargs = fc_kwargs or {}
     tm_kwargs = tm_kwargs or {}
@@ -941,7 +941,7 @@ def find_nucleoli(image: ArrayLike[Any], mask: ArrayLike[int], **kwargs) -> NDAr
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        model = models.CellposeModel(gpu=True)
+        model = models.CellposeModel(gpu=True, model_type=kwargs.get("model_type", "cyto3"))
     labels = [label for label in np.unique(mask) if label > 0]
     if labels:
         i, images = zip(*[fill_mask(image, mask == label) for label in np.unique(mask) if label > 0])
