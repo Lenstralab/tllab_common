@@ -752,6 +752,69 @@ def run_cellpose_cpu(
             lap_track(image, tif_file, tiff_out, table_out, nucleoli_kwargs=rn_kwargs, **tm_kwargs)
 
 
+def run_cellpose_cpu_serial(
+    image: Path | str,
+    tiff_out: Path | str,
+    channel_cell: int,
+    channel_nuc: int = None,
+    *,
+    model_type: str = None,
+    table_out: Path | str = None,
+    cp_kwargs: dict[str, str] = None,
+    tm_kwargs: dict[str, str] = None,
+    rn_kwargs: dict[str, str | float] = None,
+    cell_tracker: str = "trackmate",
+) -> None:
+    cp_kwargs = cp_kwargs or {}
+    tm_kwargs = tm_kwargs or {}
+    rn_kwargs = rn_kwargs or {}
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        model = models.CellposeModel(gpu=False, model_type=model_type)
+    cp_kwargs = filter_kwargs(model.eval, cp_kwargs)
+
+    with tempfile.TemporaryDirectory() as tempdir:
+        tif_file = Path(tempdir) / "tm.tif"
+        with Imread(image, axes="ctyx") as im:  # noqa
+            with IJTiffFile(tif_file, pxsize=im.pxsize_um) as tif:
+                for t in tqdm(
+                    range(im.shape["t"]),
+                    total=im.shape["t"],
+                    desc="running cellpose on the CPU",
+                    disable=im.shape["t"] < 10,
+                ):
+                    if channel_nuc is None:
+                        cells = model.eval(
+                            np.stack((im[channel_cell, t],), 0),  # type: ignore
+                            channel_axis=0,
+                            channels=[[0, 0]],
+                            **cp_kwargs,
+                        )[0]
+                        tif.save(cells, 0, 0, t)
+                    else:
+                        cells = model.eval(
+                            np.stack((im[channel_cell, t], im[channel_nuc, t]), 0),  # type: ignore
+                            channel_axis=0,
+                            channels=[[1, 0]],
+                            **cp_kwargs,
+                        )[0]
+                        nuclei = model.eval(
+                            np.stack((im[channel_cell, t], im[channel_nuc, t]), 0),  # type: ignore
+                            channel_axis=0,
+                            channels=[[2, 0]],
+                            **cp_kwargs,
+                        )[0]
+                        cells = connect_nuclei_with_cells(nuclei, cells)
+                        tif.save(cells, 0, 0, t)
+                        tif.save(nuclei, 1, 0, t)
+
+        rn_kwargs["channel"] = channel_cell if channel_nuc is None else channel_nuc
+        if cell_tracker == "trackmate":
+            trackmate(image, tif_file, tiff_out, table_out, nucleoli_kwargs=rn_kwargs, **tm_kwargs)  # noqa
+        else:
+            lap_track(image, tif_file, tiff_out, table_out, nucleoli_kwargs=rn_kwargs, **tm_kwargs)
+
+
 def run_cellpose_gpu(
     image: Path | str,
     tiff_out: Path | str,
