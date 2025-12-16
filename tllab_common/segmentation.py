@@ -726,7 +726,7 @@ def run_cellpose_cpu(
     rn_kwargs = rn_kwargs or {}
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        model = models.CellposeModel(gpu=False, model_type=model_type)
+        model = models.CellposeModel(gpu=False, model_type=model_type or "cyto3")
     cp_kwargs = filter_kwargs(model.eval, cp_kwargs)
 
     with tempfile.TemporaryDirectory() as tempdir:
@@ -770,7 +770,7 @@ def run_cellpose_cpu_serial(
     rn_kwargs = rn_kwargs or {}
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        model = models.CellposeModel(gpu=False, model_type=model_type)
+        model = models.CellposeModel(gpu=False, model_type=model_type or "cyto3")
     cp_kwargs = filter_kwargs(model.eval, cp_kwargs)
 
     with tempfile.TemporaryDirectory() as tempdir:
