@@ -629,12 +629,6 @@ def run_stardist(
     rn_kwargs: dict[str, str | float] = None,
     cell_tracker: str = "trackmate",
 ) -> None:
-    warnings.warn(
-        "stardist seems currently unmaintained and therefore will be removed in the future, use cellpose instead",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-
     if model_type is None:
         model_type = "2D_versatile_fluo"
     if StarDist2D is None:
