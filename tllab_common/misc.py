@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import io
 import pickle
+import random
 import re
 import sys
 import warnings
@@ -640,6 +641,34 @@ def add_extra_parameters(parameters: dict[Hashable, Any], extra_parameters: dict
             add_extra_parameters(parameters[key], value)
         else:
             parameters[key] = value
+
+
+class TempDir:
+    def __init__(self, path: Path | str) -> None:
+        self.path = path
+        self.path.mkdir(parents=True, exist_ok=False)
+
+    @classmethod
+    def random(cls, path: Path | str, pre_fix: str = None) -> Self:
+        if pre_fix is None:
+            return cls(path / "".join(random.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=12)))
+        else:
+            return cls(path / (f"{pre_fix}_" + "".join(random.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=12))))
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *_args, **_kwargs) -> None:
+        self.path.rmdir()
+
+    def __truediv__(self, other: str) -> Path:
+        return self.path / other
+
+    def __str__(self) -> str:
+        return str(self.path)
+
+    def __repr__(self) -> str:
+        return f"TempDir('{self}')"
 
 
 get_config = yaml_load
