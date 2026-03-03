@@ -288,7 +288,9 @@ def connect_nuclei_with_cells(nuclei: ArrayLike, cells: ArrayLike) -> np.ndarray
     nuclei_flat = nuclei.flatten()[j]
     cells_flat = cells.flatten()[j]
     jaccard = cdist(
-        np.vstack([nuclei_flat == i for i in i_nuclei]).astype(int) if len(i_nuclei) else np.zeros((0, nuclei_flat.size)),
+        np.vstack([nuclei_flat == i for i in i_nuclei]).astype(int)
+        if len(i_nuclei)
+        else np.zeros((0, nuclei_flat.size)),
         np.vstack([cells_flat == i for i in i_cells]).astype(int) if len(i_cells) else np.zeros((0, cells_flat.size)),
         "jaccard",
     )

@@ -22,10 +22,12 @@ from typing import Any, Callable, Hashable, Sequence, TypeVar
 import makefun
 import numpy as np
 import pandas
+import polars as pl
 import py
 import regex
 from bidict import bidict
 from IPython import embed
+from polars.datatypes import DataTypeClass
 from ruamel import yaml
 
 from .io import get_params, pickle_dump, yaml_dump, yaml_load
@@ -669,6 +671,49 @@ class TempDir:
 
     def __repr__(self) -> str:
         return f"TempDir('{self}')"
+
+
+def merge_polars_data_type(a: DataTypeClass, b: DataTypeClass) -> DataTypeClass:
+    """find a datatype that can express everything in a and b"""
+    bits = {
+        pl.Int8: 8,
+        pl.Int16: 16,
+        pl.Int32: 32,
+        pl.Int64: 64,
+        pl.Int128: 128,
+        pl.UInt8: 8,
+        pl.UInt16: 16,
+        pl.UInt32: 32,
+        pl.UInt64: 64,
+        pl.UInt128: 128,
+        pl.Float16: 16,
+        pl.Float32: 32,
+        pl.Float64: 64,
+    }
+    i = {8: pl.Int8, 16: pl.Int16, 32: pl.Int32, 64: pl.Int64, 128: pl.Int128}
+    u = {8: pl.UInt8, 16: pl.UInt16, 32: pl.UInt32, 64: pl.UInt64, 128: pl.UInt128}
+    f = {16: pl.Float16, 32: pl.Float32, 64: pl.Float64}
+
+    if a.is_(b):
+        return a
+    elif a.is_signed_integer() and b.is_signed_integer():
+        return i[max(bits[a], bits[b])]
+    elif a.is_unsigned_integer() and b.is_unsigned_integer():
+        return u[max(bits[a], bits[b])]
+    elif a.is_(pl.UInt128) | b.is_(pl.UInt128):
+        raise ValueError(f"type {a} is incompatible with type {b}")
+    elif a.is_signed_integer() and b.is_unsigned_integer():
+        return i[max(bits[a], 2 * bits[b])]
+    elif a.is_unsigned_integer() and b.is_signed_integer():
+        return i[2 * max(bits[a], bits[b])]
+    elif a.is_float() and b.is_float():
+        return f[max(bits[a], bits[b])]
+    elif a.is_float() and b.is_integer() and bits[b] < 64:
+        return f[max(bits[a], 2 * bits[b])]
+    elif a.is_integer() and b.is_float() and bits[a] < 64:
+        return f[max(2 * bits[a], bits[b])]
+    else:
+        raise ValueError(f"type {a} is incompatible with type {b}")
 
 
 get_config = yaml_load

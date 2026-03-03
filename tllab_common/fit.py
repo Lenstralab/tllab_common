@@ -12,6 +12,7 @@ from numpy.typing import ArrayLike
 from parfor import pmap
 from scipy import special, stats
 from scipy.optimize import OptimizeResult, minimize
+
 from .misc import ErrorValue
 
 Number = int | float | complex
