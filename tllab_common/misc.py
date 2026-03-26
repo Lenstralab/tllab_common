@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import fnmatch
 import io
 import pickle
 import random
@@ -12,12 +13,13 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from functools import wraps
-from glob import glob
+from glob import glob, has_magic
 from inspect import Parameter, getfile, signature
+from itertools import chain
 from pathlib import Path
 from shutil import copyfile
 from traceback import format_exc, print_exception
-from typing import Any, Callable, Hashable, Sequence, TypeVar
+from typing import Any, Callable, Hashable, Iterable, Sequence, TypeVar
 
 import makefun
 import numpy as np
@@ -27,6 +29,7 @@ import py
 import regex
 from bidict import bidict
 from IPython import embed
+from ndbioimage import Imread, JVMException, get_positions
 from polars.datatypes import DataTypeClass
 from ruamel import yaml
 
@@ -714,6 +717,51 @@ def merge_polars_data_type(a: DataTypeClass, b: DataTypeClass) -> DataTypeClass:
         return f[max(2 * bits[a], bits[b])]
     else:
         raise ValueError(f"type {a} is incompatible with type {b}")
+
+
+def resolve_to_anchor(path: Path | str, anchor: Path | str) -> Path:
+    """make path absolute but . at the beginning is replaced by anchor"""
+    path = Path(path)
+    anchor = Path(anchor)
+    return path if path.is_absolute() or anchor is None else (anchor / path).resolve()
+
+
+def image_glob(path: Path | str, pattern: str) -> Iterable[Path]:
+    """glob, but resolve Pos* in image files"""
+    path = Path(path)
+    path_list = []
+    pat_name = Path(pattern).name
+    if pat_name.lower().startswith("pos"):
+        if Path(pattern).parent == Path("."):
+            image_paths = (path,)
+        else:
+            image_paths = list(path.glob(str(Path(pattern).parent)))
+        for image_path in image_paths:
+            if has_magic(pat_name):
+                positions = get_positions(image_path)
+                if positions:
+                    for i in positions:
+                        if fnmatch.fnmatch(f"Pos{i}", pat_name):
+                            path_list.append(image_path / f"Pos{i}")
+                else:
+                    i = 0
+                    while True:
+                        try:
+                            file = image_path / f"Pos{i}"
+                            with Imread(file):  # noqa
+                                if fnmatch.fnmatch(f"Pos{i}", pat_name):
+                                    path_list.append(file)
+                        except (FileNotFoundError, JVMException):
+                            break
+                        i += 1
+            else:
+                try:
+                    file = image_path / pat_name
+                    with Imread(file):  # noqa
+                        path_list.append(file)
+                except FileNotFoundError:
+                    pass
+    return chain(path.glob(pattern), path_list)
 
 
 get_config = yaml_load
