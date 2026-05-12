@@ -16,6 +16,7 @@ from .misc import capture_stderr
 
 with capture_stderr():
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+    os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
     import tensorflow
 
     tensorflow.get_logger().setLevel(logging.ERROR)
@@ -659,11 +660,11 @@ def run_stardist(
                         t,
                     )
 
-        rn_kwargs["channel"] = channel_cell
-    if cell_tracker == "trackmate":
-        trackmate(image, tif_file, tiff_out, table_out, nucleoli_kwargs=rn_kwargs, **tm_kwargs)  # noqa
-    else:
-        lap_track(image, tif_file, tiff_out, table_out, nucleoli_kwargs=rn_kwargs, **tm_kwargs)
+            rn_kwargs["channel"] = channel_cell
+        if cell_tracker == "trackmate":
+            trackmate(image, tif_file, tiff_out, table_out, nucleoli_kwargs=rn_kwargs, **tm_kwargs)  # noqa
+        else:
+            lap_track(image, tif_file, tiff_out, table_out, nucleoli_kwargs=rn_kwargs, **tm_kwargs)
 
 
 class CellPoseTiff(IJTiffParallel):
