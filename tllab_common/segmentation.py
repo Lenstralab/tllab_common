@@ -303,7 +303,7 @@ def connect_nuclei_with_cells(nuclei: ArrayLike, cells: ArrayLike) -> np.ndarray
         if not any([n in k for k in d.keys()]):
             visited_nuclei = set()
             visited_cells = set()
-            nuclei_set = {n}
+            nuclei_set = {int(n)}
             cell_set = set()
             while len(nuclei_set - visited_nuclei) or len(cell_set - visited_cells):
                 for i in nuclei_set - visited_nuclei:
@@ -463,7 +463,9 @@ def lap_track(
 
         # relabel the labels according to the tracks and also add missing labels by interpolation
         swapper = SwapLabels(tracks, min_frames)
-        dtype = "uint8" if swapper.tracks.select(pl.col("track_id").max()).item() <= 255 else "uint16"
+        dtype = (
+            "uint8" if (m := swapper.tracks.select(pl.col("track_id").max()).item()) is None or m <= 255 else "uint16"
+        )
         tif = stack.enter_context(IJTiffFile(tiff_out, pxsize=mask.pxsize_um, colormap="glasbey", dtype=dtype))
         for t in trange(mask.shape["t"], desc="reordering cells", leave=False):
             frame = swapper(np.asarray(mask[:, t]), t)  # type: ignore
@@ -571,7 +573,7 @@ def trackmate(
 
         # relabel the labels according to the tracks and also add missing labels by interpolation
         swapper = SwapLabels(tracks, min_frames)
-        dtype = "uint8" if swapper.tracks["label"].max() <= 255 else "uint16"
+        dtype = "uint8" if (m := swapper.tracks["label"].max()) is None or not np.isfinite(m) or m <= 255 else "uint16"
         tif = stack.enter_context(IJTiffFile(tiff_out, pxsize=mask.pxsize_um, colormap="glasbey", dtype=dtype))
         for t in trange(mask.shape["t"], desc="reordering cells with trackmate", leave=False):
             frame = swapper(np.asarray(mask[:, t]), t)  # type: ignore
@@ -961,7 +963,7 @@ def run_pre_track(
     if isinstance(pre_track, pandas.DataFrame):
         pre_track = pl.from_pandas(pre_track)
 
-    dtype = "uint8" if pre_track.select(pl.col("cell").max()).item() < 255 else "uint16"
+    dtype = "uint8" if (m := pre_track.select(pl.col("cell").max()).item()) is None or m <= 255 else "uint16"
     with Imread(image) as im:  # noqa
         with PreTrackTiff(
             im.shape["yx"],  # type: ignore

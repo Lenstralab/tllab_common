@@ -1,6 +1,6 @@
 [project]
 name = "tllab_common"
-version = "2026.5.0"
+version = "2026.6.0"
 description = "Common code for the Lenstra lab."
 authors = [
     { name = "Lenstra lab NKI", email = "t.lenstra@nki.nl" }
