@@ -6,8 +6,6 @@ import pyparsing as pp
 
 __all__ = ["query"]
 
-from numpy.random.mtrand import Sequence
-
 ops = {
     "**": op.pow,
     "~": op.not_,

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import contextlib
 import fnmatch
+import importlib
+import inspect
 import io
 import pickle
 import random
@@ -56,6 +58,7 @@ __all__ = [
     "ErrorValue",
     "format_list",
     "get_config",
+    "get_lim",
     "get_slice",
     "ipy_debug",
     "SliceKeepSize",
@@ -63,6 +66,16 @@ __all__ = [
     "warn",
     "wraps_combine",
 ]
+
+
+def get_lim(x, log=False):
+    if log:
+        return np.exp(get_lim(np.log(x)))
+    q1, q2, q3 = np.nanpercentile(x, (25, 50, 75), 0)
+    lb = np.min(x[x >= 4 * q1 - 3 * q3])
+    ub = np.max(x[x <= 4 * q3 - 3 * q1])
+    d = ub - lb
+    return lb - d / 20, ub + d / 20
 
 
 @contextlib.contextmanager

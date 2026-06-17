@@ -283,9 +283,9 @@ def connect_nuclei_with_cells(nuclei: ArrayLike, cells: ArrayLike) -> np.ndarray
     cells = np.asarray(cells)
     i_nuclei = np.array([i for i in np.unique(nuclei) if i > 0])
     i_cells = np.array([i for i in np.unique(cells) if i > 0])
-    if len(i_nuclei) == 0 | len(i_cells) == 0:
+    if len(i_nuclei) == 0 or len(i_cells) == 0:
         return np.zeros_like(cells)
-    j = (nuclei.flatten()) > 0 | (cells.flatten() > 0)
+    j = (nuclei.flatten() > 0) | (cells.flatten() > 0)
     nuclei_flat = nuclei.flatten()[j]
     cells_flat = cells.flatten()[j]
     jaccard = cdist(
@@ -340,7 +340,7 @@ def trackmate_fiji(
     file_out: Path | str,
     fiji_path: Path | str = None,
     channel: int = 0,
-    **kwargs: dict[str, [str, int, float, bool]],  # type: ignore
+    **kwargs: str | int | float | bool,
 ) -> None:
     if fiji_path is not None:
         fiji_path = Path(fiji_path)

@@ -348,11 +348,11 @@ class GammaCDF(Fit):
         """y = γ(k, x / θ) / Γ(k)"""
         m = np.sum(-self.x[1:] * np.diff(self.y))
         v = np.sum(-((self.x[1:] - m) ** 2) * np.diff(self.y))
-        return m**2 / v, v / m  # A, k, theta
+        return m**2 / v, v / m  # k, θ
 
     @staticmethod
     def fun(p: ArrayLike, x: Number | ArrayLike) -> ArrayLike:
-        """p: k, theta"""
+        """p: k, θ"""
         return 1 - special.gammainc(p[0], x / p[1])
 
 
