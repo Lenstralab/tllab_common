@@ -69,11 +69,15 @@ __all__ = [
 
 
 def get_lim(x, log=False):
+    if len(x) == 0:
+        return 0, 1
     if log:
         return np.exp(get_lim(np.log(x)))
     q1, q2, q3 = np.nanpercentile(x, (25, 50, 75), 0)
-    lb = np.min(x[x >= 4 * q1 - 3 * q3])
-    ub = np.max(x[x <= 4 * q3 - 3 * q1])
+    xl = x[x >= 4 * q1 - 3 * q3]
+    lb = np.min(xl) if len(xl) else np.min(x)
+    xu = x[x <= 4 * q3 - 3 * q1]
+    ub = np.max(xu) if len(xu) else np.max(x)
     d = ub - lb
     return lb - d / 20, ub + d / 20
 
