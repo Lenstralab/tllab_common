@@ -61,6 +61,7 @@ __all__ = [
     "get_lim",
     "get_slice",
     "ipy_debug",
+    "merge_polars_data_type",
     "SliceKeepSize",
     "Struct",
     "warn",

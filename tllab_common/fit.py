@@ -228,20 +228,31 @@ class Fit(metaclass=ABCMeta):
     def compare(self, other, print_result=True) -> np.ndarray:
         """Compare a fit with another fit of the same type on other data to find if their parameters belong to the same
         distribution. Parameters are assumed to be normally distributed around p with a standard deviation of
-        p_ci_95 / 1.96. P-values are calculated using a Mann-Whitney U test. Remember to use the Bonferonni method,
-        to correct your signicance level to deal with false positives."""
+        p_ci_95 / 1.96. P-values are calculated using a t-test and a Mann-Whitney U test. Remember to use the
+        Bonferonni method, to correct your significance level to deal with false positives."""
         if not self.__class__.__name__ == other.__class__.__name__:
             raise ValueError(f"Cannot compare {self.__class__.__name__} to {other.__class__.__name__}")
-        m = [
-            mannwhitneyu(self.n, p1, dp1 * np.sqrt(self.n) / 1.96, other.n, p2, dp2 * np.sqrt(other.n) / 1.96).pvalue
+        tt = [
+            t_test(self.n_p, self.n, p1, dp1 / 1.96, other.n_p, other.n, p2, dp2 / 1.96).pvalue
             for p1, dp1, p2, dp2 in zip(self.p, self.p_ci95, other.p, other.p_ci95)
         ]
         if print_result:
-            for i, (n, p1, dp1, p2, dp2) in enumerate(zip(m, self.p, self.p_ci95, other.p, other.p_ci95), 1):
+            print("t-test:")
+            for i, (n, p1, dp1, p2, dp2) in enumerate(zip(tt, self.p, self.p_ci95, other.p, other.p_ci95), 1):
                 e1 = ErrorValue(p1, dp1)
                 e2 = ErrorValue(p2, dp2)
                 print(f"parameter {i}: {e1:.2g} <--> {e2:.2g}: {n}")
-        return np.array(m)
+        mwu = [
+            mannwhitneyu(self.n, p1, dp1 / 1.96, other.n, p2, dp2 / 1.96).pvalue
+            for p1, dp1, p2, dp2 in zip(self.p, self.p_ci95, other.p, other.p_ci95)
+        ]
+        if print_result:
+            print("Mann-Whitney U test:")
+            for i, (n, p1, dp1, p2, dp2) in enumerate(zip(mwu, self.p, self.p_ci95, other.p, other.p_ci95), 1):
+                e1 = ErrorValue(p1, dp1)
+                e2 = ErrorValue(p2, dp2)
+                print(f"parameter {i}: {e1:.2g} <--> {e2:.2g}: {n}")
+        return np.array(mwu), np.array(tt)
 
 
 class Exponential1(Fit):
@@ -440,6 +451,8 @@ def fminerr(
 
 
 MannwhitneyuResult = namedtuple("MannwhitneyuResult", ("statistic", "pvalue"))
+TTestResult = namedtuple("TTestResult", ("statistic", "pvalue"))
+WaldZTestResult = namedtuple("WaldZTestResult", ("statistic", "pvalue"))
 
 
 def get_mwu_z(u: float, n1: int, n2: int, continuity: bool = True) -> float:
@@ -465,6 +478,21 @@ def get_mwu_z(u: float, n1: int, n2: int, continuity: bool = True) -> float:
     return z
 
 
+def t_test(p1: int, n1: int, mu1: float, sigma1: float, p2: int, n2: int, mu2: float, sigma2: float) -> TTestResult:
+    t = (mu1 - mu2) / (np.sqrt(sigma1**2 + sigma2**2))
+    dof = (sigma1**2 + sigma2**2) ** 2 / (sigma1**4 / (n1 - p1) + sigma2**4 / (n2 - p2))
+    p = 2 * (1 - stats.t.cdf(abs(t), df=dof))
+    return TTestResult(t, p)
+
+
+def wald_z_test(mu1: float, sigma1: float, mu2: float, sigma2: float) -> WaldZTestResult:
+    d = mu1 - mu2
+    v = np.sqrt(sigma1**2 + sigma2**2)
+    z = d / v
+    p = 2 * (1 - scipy.stats.norm.cdf(np.abs(z)))
+    return WaldZTestResult(z, p)
+
+
 def mannwhitneyu(n1: int, mu1: float, sigma1: float, n2: int, mu2: float, sigma2: float) -> MannwhitneyuResult:
     """Perform the Mann-Whitney U rank test on two independent samples,
     with only knowledge of the shape of the distributions (normal distribution)
@@ -476,7 +504,15 @@ def mannwhitneyu(n1: int, mu1: float, sigma1: float, n2: int, mu2: float, sigma2
     mu1, mu2 : means
     sigma1, sigma2 : standard deviations
     """
-    u = n1 * n2 * (scipy.special.erf((mu1 - mu2) / np.sqrt(2 * (sigma1**2 + sigma2**2))) + 1) / 2
+    u = (
+        n1
+        * n2
+        * (
+            scipy.special.erf((mu1 - mu2) / np.sqrt(2 * ((sigma1 * np.sqrt(n1)) ** 2 + (sigma2 * np.sqrt(n2)) ** 2)))
+            + 1
+        )
+        / 2
+    )
     z = get_mwu_z(u, n1, n2)
     p = scipy.stats.norm.sf(np.abs(z)) * 2
     return MannwhitneyuResult(u, p)
