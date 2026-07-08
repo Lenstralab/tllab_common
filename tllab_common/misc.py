@@ -302,12 +302,15 @@ class ErrorValue:
                     digits += len(zeros[0])
         exp = regex.findall(r"[eE]([-+]?\d+)$", value_str)
         exp = int(exp[0]) if exp else 0
-        error_str = f"{round(self.error * 10**-exp, digits):{f'.{digits}f'}}"
+        if self.error > 10**digits * self.value:  # type: ignore
+            error_str = f"{self.error * 10**-exp:g}"
+        else:
+            error_str = f"{self.error * 10**-exp:{f'.{digits}f'}}"
         split = regex.findall(r"([^eE]+)([eE][^eE]+)", value_str)
         if split:
-            return f"({split[0][0]}±{error_str}){split[0][1]}"
+            return regex.sub(r"(e-?)\+?0+(\d+)", r"\1\2", f"({split[0][0]}±{error_str}){split[0][1]}")
         else:
-            return f"{value_str}±{error_str}"
+            return regex.sub(r"(e-?)\+?0+(\d+)", r"\1\2", f"{value_str}±{error_str}")
 
     def __str__(self) -> str:
         return f"{self}"
