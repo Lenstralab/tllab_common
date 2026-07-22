@@ -644,7 +644,7 @@ def run_stardist(
     tm_kwargs = tm_kwargs or {}
     rn_kwargs = rn_kwargs or {}
 
-    with tempfile.TemporaryDirectory() as tempdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tempdir:
         tif_file = Path(tempdir) / "tm.tif"
 
         with Imread(image, axes="ctyx") as im:  # noqa
@@ -728,7 +728,7 @@ def run_cellpose_cpu(
         model = models.CellposeModel(gpu=False, model_type=model_type or "cyto3")
     cp_kwargs = filter_kwargs(model.eval, cp_kwargs)
 
-    with tempfile.TemporaryDirectory() as tempdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tempdir:
         tif_file = Path(tempdir) / "tm.tif"
         with Imread(image, axes="ctyx") as im:  # noqa
             with CellPoseTiff(model, cp_kwargs, tif_file, pxsize=im.pxsize_um) as tif:
@@ -772,7 +772,7 @@ def run_cellpose_cpu_serial(
         model = models.CellposeModel(gpu=False, model_type=model_type or "cyto3")
     cp_kwargs = filter_kwargs(model.eval, cp_kwargs)
 
-    with tempfile.TemporaryDirectory() as tempdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tempdir:
         tif_file = Path(tempdir) / "tm.tif"
         with Imread(image, axes="ctyx") as im:  # noqa
             with IJTiffFile(tif_file, pxsize=im.pxsize_um) as tif:
@@ -834,7 +834,7 @@ def run_cellpose_gpu(
         warnings.simplefilter("ignore")
         model = models.CellposeModel(gpu=True, model_type=model_type or "cyto3")
     cp_kwargs = filter_kwargs(model.eval, cp_kwargs)
-    with tempfile.TemporaryDirectory() as tempdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tempdir:
         tif_file = Path(tempdir) / "tm.tif"
         with Imread(image, axes="ctyx") as im:  # noqa
             with IJTiffFile(tif_file, pxsize=im.pxsize_um) as tif:
@@ -912,7 +912,7 @@ def run_findcells(
     rn_kwargs = rn_kwargs or {}
     fc_kwargs = filter_kwargs(findcells, fc_kwargs)
 
-    with tempfile.TemporaryDirectory() as tempdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tempdir:
         tif_file = Path(tempdir) / "tm.tif"
 
         with Imread(image, axes="ctyx") as im:  # noqa
