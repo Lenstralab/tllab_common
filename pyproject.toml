@@ -1,6 +1,6 @@
 [project]
 name = "tllab_common"
-version = "2026.7.1"
+version = "2026.10.0"
 description = "Common code for the Lenstra lab."
 authors = [
     { name = "Lenstra lab NKI", email = "t.lenstra@nki.nl" }
@@ -8,7 +8,7 @@ authors = [
 license = { text = "GPL-3.0-or-later"}
 readme = "README.md"
 keywords = ["burst", "transcription"]
-include = ["transform.txt", "trackmate.jy"]
+include = ["transform.txt", "trackmate.jy", "trackmate.groovy"]
 requires-python = ">= 3.10"
 dependencies = [
     "bidict",

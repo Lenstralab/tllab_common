@@ -10,8 +10,9 @@ from functools import wraps
 from inspect import getfullargspec
 from io import StringIO
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Optional, Sequence
 
+from .fiji import run_fiji
 from .misc import capture_stderr
 
 with capture_stderr():
@@ -32,6 +33,7 @@ logging.getLogger("ray").setLevel(logging.ERROR)
 
 with redirect_stdout(StringIO()):
     from cellpose import models
+
 from csbdeep.utils import normalize
 from laptrack import LapTrack, ParallelBackend
 from ndbioimage import Imread
@@ -67,7 +69,7 @@ except ImportError:
         return
 
 
-def label_dist(labels: np.ndarray, lbl: int, mask: np.ndarray = None) -> np.ndarray:
+def label_dist(labels: np.ndarray, lbl: int, mask: Optional[np.ndarray] = None) -> np.ndarray:
     """make an array with distances to the edge of the lbl in labels, negative outside, positive inside"""
     lbl_mask = labels == lbl
     dist = -distance_transform_edt(lbl_mask == 0)
@@ -84,9 +86,9 @@ def interp_label(
     ts: Sequence[int],
     labels: Sequence[np.ndarray],
     lbl: int,
-    mask: np.ndarray = None,
+    mask: Optional[np.ndarray] = None,
 ) -> np.ndarray:
-    """return a label field with lbl at time q interpolated from labels at times ts"""
+    """return a label field with lbl at time t interpolated from labels at times ts"""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=RuntimeWarning)
         return lbl * (
@@ -101,7 +103,7 @@ def interp_label(
 
 
 class SwapLabels:
-    def __init__(self, tracks: pandas.DataFrame | pl.DataFrame, min_frames: int = None) -> None:  # noqa
+    def __init__(self, tracks: pandas.DataFrame | pl.DataFrame, min_frames: Optional[int] = None) -> None:  # noqa
         if isinstance(tracks, pl.DataFrame):
             if min_frames:
                 tracks = tracks.filter(pl.len().over("track_id") > min_frames)
@@ -172,17 +174,22 @@ def sort_labels(tracks: pl.DataFrame | pandas.DataFrame) -> pl.DataFrame | panda
         return tracks.groupby("label").apply(lambda x: x.assign(label=relabel_dict[x["label"].mean()]))  # type: ignore
 
 
-def get_time_points(t: int, missing: Sequence[int]) -> tuple[int, int]:
+def get_time_points(t: int, missing: Sequence[int], max: Optional[int] = None) -> list[int]:
     t_a = t - 1
     while t_a in missing:
         t_a -= 1
     t_b = t + 1
     while t_b in missing:
         t_b += 1
-    return t_a, t_b
+    if max is None:
+        return [t for t in (t_a, t_b) if 0 <= t]
+    else:
+        return [t for t in (t_a, t_b) if 0 <= t < max]
 
 
-def interpolate_missing(tracks: pl.DataFrame | pandas.DataFrame, t_len: int = None) -> pl.DataFrame | pandas.DataFrame:
+def interpolate_missing(
+    tracks: pl.DataFrame | pandas.DataFrame, t_len: Optional[int] = None
+) -> pl.DataFrame | pandas.DataFrame:
     """interpolate the position of the cell in missing frames"""
     missing = []
     if isinstance(tracks, pl.DataFrame):
@@ -335,10 +342,10 @@ def connect_nuclei_with_cells(nuclei: ArrayLike, cells: ArrayLike) -> np.ndarray
     return cells_new
 
 
-def trackmate_fiji(
+def trackmate_fiji0(
     file_in: Path | str,
     file_out: Path | str,
-    fiji_path: Path | str = None,
+    fiji_path: Optional[Path | str] = None,
     channel: int = 0,
     **kwargs: str | int | float | bool,
 ) -> None:
@@ -372,16 +379,70 @@ def trackmate_fiji(
     ij.dispose()
 
 
+def trackmate_fiji(
+    file_in: Path | str,
+    file_out: Path | str,
+    fiji_path: Optional[Path | str] = None,
+    channel: int = 0,
+    **kwargs: str | int | float | bool,
+) -> None:
+    """track a label image with TrackMate, by running Fiji as a separate process from the command line (this needs a
+    running JVM but not a running JVM in this process, unlike trackmate_fiji)
+
+    Runs `fiji --run trackmate.groovy '<parameters>'`, where the parameters are TrackMate's settings, see
+    https://imagej.net/scripting/headless. The input and output file names are passed in the environment
+    (TLLAB_TRACKMATE_FILE_IN and TLLAB_TRACKMATE_FILE_OUT) because the parameter list is a comma separated list of
+    key=value pairs, which cannot represent Windows paths. A RuntimeError is raised if the script fails or does not
+    write file_out.
+
+    fiji_path: the Fiji launcher or a Fiji installation directory. By default the launcher is looked up in the
+        FIJI_PATH and FIJI_HOME environment variables, on the PATH, and in the standard installation directories.
+    channel: the channel with the labels, 0-based.
+    """
+    settings = dict(
+        file_in=str(file_in),
+        file_out=str(file_out),
+        TARGET_CHANNEL=1 + channel,
+        MIN_AREA=20,
+        SIMPLIFY_CONTOURS=False,
+        MAX_FRAME_GAP=2,
+        ALTERNATIVE_LINKING_COST_FACTOR=1.05,
+        LINKING_MAX_DISTANCE=15.0,
+        GAP_CLOSING_MAX_DISTANCE=15.0,
+        SPLITTING_MAX_DISTANCE=15.0,
+        ALLOW_GAP_CLOSING=True,
+        ALLOW_TRACK_SPLITTING=False,
+        ALLOW_TRACK_MERGING=False,
+        MERGING_MAX_DISTANCE=15.0,
+        CUTOFF_PERCENTILE=0.9,
+    )
+    settings.update(
+        {key.upper(): value for key, value in kwargs.items() if key in settings}  # type: ignore
+    )
+    result = run_fiji(
+        str(Path(__file__).parent / "trackmate.groovy"),
+        fiji_path,
+        settings,
+        {"TLLAB_TRACKMATE_FILE_IN": str(file_in), "TLLAB_TRACKMATE_FILE_OUT": str(file_out)},
+    )
+    # the script writes no file and still exits with 0 when it fails, so look for the marker it prints on success
+    if result.returncode != 0 or "TRACKMATE_SUCCESS" not in result.stdout or not Path(file_out).is_file():
+        raise RuntimeError(
+            f"TrackMate failed (Fiji exited with code {result.returncode}).\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+
+
 def lap_track(
     max_file: Path | str,
     tif_file: Path | str,
     tiff_out: Path | str,
-    table_out: Path | str = None,
-    min_frames: int = None,
+    table_out: Optional[Path | str] = None,
+    min_frames: Optional[int] = None,
     remove_borders: bool = False,
-    nucleoli_kwargs: dict[str, Any] = None,
-    min_area: int = None,
-    **kwargs: dict[str, str],
+    nucleoli_kwargs: Optional[dict[str, Any]] = None,
+    min_area: Optional[int] = None,
+    **kwargs: str,
 ) -> None:
     """use laptrack to make sure cells have the same label in all frames, relabel even if there's just one frame,
     to make sure that cell numbers are consecutive
@@ -483,6 +544,7 @@ def lap_track(
                         time_points = get_time_points(
                             t,
                             missing.filter(pl.col("track_id") == cell).select("t").to_series().to_list(),
+                            mask.shape["t"],
                         )
                         add_cell = interp_label(
                             t,
@@ -519,10 +581,10 @@ def trackmate(
     max_file: Path | str,
     tif_file: Path | str,
     tiff_out: Path | str,
-    table_out: Path | str = None,
-    min_frames: int = None,
+    table_out: Optional[Path | str] = None,
+    min_frames: Optional[int] = None,
     remove_borders: bool = False,
-    nucleoli_kwargs: dict[str, Any] = None,
+    nucleoli_kwargs: Optional[dict[str, Any]] = None,
     **kwargs: dict[str, str],
 ) -> None:
     """run trackmate to make sure cells have the same label in all frames, relabel even if there's just one frame,
@@ -589,8 +651,7 @@ def trackmate(
                     missing_t = missing.query("t==@t", local_dict=dict(t=t))
                     for cell in missing_t["label"].unique():
                         time_points = get_time_points(
-                            t,
-                            missing.query("label==@cell", local_dict=dict(cell=cell))["t"].tolist(),
+                            t, missing.query("label==@cell", local_dict=dict(cell=cell))["t"].tolist(), mask.shape["t"]
                         )
                         a = interp_label(
                             t,
@@ -628,10 +689,10 @@ def run_stardist(
     tiff_out: Path | str,
     channel_cell: int,
     *,
-    model_type: str = None,
-    table_out: Path | str = None,
-    tm_kwargs: dict[str, str] = None,
-    rn_kwargs: dict[str, str | float] = None,
+    model_type: Optional[str] = None,
+    table_out: Optional[Path | str] = None,
+    tm_kwargs: Optional[dict[str, str]] = None,
+    rn_kwargs: Optional[dict[str, str | float]] = None,
     cell_tracker: str = "trackmate",
 ) -> None:
     if model_type is None:
@@ -681,7 +742,7 @@ class CellPoseTiff(IJTiffParallel):
         self.cp_kwargs = cp_kwargs or {}
         super().__init__(*args, **kwargs)
 
-    def parallel(self, frame: tuple[ArrayLike, ...]) -> tuple[FrameInfo, ...]:
+    def parallel(self, frame: tuple[ArrayLike, ...]) -> tuple[FrameInfo, ...]:  # noqa
         if len(frame) == 1:
             cells = self.model.eval(
                 np.stack(frame, 0),  # type: ignore
@@ -711,13 +772,13 @@ def run_cellpose_cpu(
     image: Path | str,
     tiff_out: Path | str,
     channel_cell: int,
-    channel_nuc: int = None,
+    channel_nuc: Optional[int] = None,
     *,
-    model_type: str = None,
-    table_out: Path | str = None,
-    cp_kwargs: dict[str, str] = None,
-    tm_kwargs: dict[str, str] = None,
-    rn_kwargs: dict[str, str | float] = None,
+    model_type: Optional[str] = None,
+    table_out: Optional[Path | str] = None,
+    cp_kwargs: Optional[dict[str, str]] = None,
+    tm_kwargs: Optional[dict[str, str]] = None,
+    rn_kwargs: Optional[dict[str, str | float]] = None,
     cell_tracker: str = "trackmate",
 ) -> None:
     cp_kwargs = cp_kwargs or {}
@@ -755,13 +816,13 @@ def run_cellpose_cpu_serial(
     image: Path | str,
     tiff_out: Path | str,
     channel_cell: int,
-    channel_nuc: int = None,
+    channel_nuc: Optional[int] = None,
     *,
-    model_type: str = None,
-    table_out: Path | str = None,
-    cp_kwargs: dict[str, str] = None,
-    tm_kwargs: dict[str, str] = None,
-    rn_kwargs: dict[str, str | float] = None,
+    model_type: Optional[str] = None,
+    table_out: Optional[Path | str] = None,
+    cp_kwargs: Optional[dict[str, str]] = None,
+    tm_kwargs: Optional[dict[str, str]] = None,
+    rn_kwargs: Optional[dict[str, str | float]] = None,
     cell_tracker: str = "trackmate",
 ) -> None:
     cp_kwargs = cp_kwargs or {}
@@ -818,13 +879,13 @@ def run_cellpose_gpu(
     image: Path | str,
     tiff_out: Path | str,
     channel_cell: int,
-    channel_nuc: int = None,
+    channel_nuc: Optional[int] = None,
     *,
-    model_type: str = None,
-    table_out: Path | str = None,
-    cp_kwargs: dict[str, str] = None,
-    tm_kwargs: dict[str, str] = None,
-    rn_kwargs: dict[str, str | float] = None,
+    model_type: Optional[str] = None,
+    table_out: Optional[Path | str] = None,
+    cp_kwargs: Optional[dict[str, str]] = None,
+    tm_kwargs: Optional[dict[str, str]] = None,
+    rn_kwargs: Optional[dict[str, str | float]] = None,
     cell_tracker: str = "trackmate",
 ) -> None:
     cp_kwargs = cp_kwargs or {}
@@ -886,7 +947,7 @@ def run_cellpose(*args, **kwargs) -> None:
 
 
 class FindCellsTiff(IJTiffParallel):
-    def __init__(self, fc_kwargs: dict[str, str] = None, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, fc_kwargs: Optional[dict[str, str]] = None, *args: Any, **kwargs: Any) -> None:
         self.fc_kwargs = fc_kwargs or {}
         super().__init__(*args, **kwargs)
 
@@ -899,12 +960,12 @@ def run_findcells(
     image: Path | str,
     tiff_out: Path | str,
     channel_cell: int,
-    channel_nuc: int = None,
+    channel_nuc: Optional[int] = None,
     *,
-    table_out: Path | str = None,
-    fc_kwargs: dict[str, str] = None,
-    tm_kwargs: dict[str, str] = None,
-    rn_kwargs: dict[str, str | float] = None,
+    table_out: Optional[Path | str] = None,
+    fc_kwargs: Optional[dict[str, str]] = None,
+    tm_kwargs: Optional[dict[str, str]] = None,
+    rn_kwargs: Optional[dict[str, str | float]] = None,
     cell_tracker: str = "trackmate",
 ) -> None:
     fc_kwargs = fc_kwargs or {}
